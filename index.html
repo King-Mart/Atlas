@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Trajectory Insight MVP</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <style>
+    body { margin:0; font-family: system-ui, Arial; }
+    #map { height: 85vh; }
+    #controls { padding: 10px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="controls">
+    <input id="time" type="range" style="width:100%"/>
+    <div id="label"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
