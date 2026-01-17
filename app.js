@@ -1,7 +1,7 @@
 function getDatasetUrl() {
   const params = new URLSearchParams(window.location.search);
   // Default is 250 flights
-  return params.get("data") || "canadian_flights_1000.json";
+  return params.get("data") || "canadian_flights_250.json";
 }
 
 const DATA_URL = getDatasetUrl();
@@ -117,76 +117,277 @@ fetch(DATA_URL)
   .then((flights) => {
     console.log(`[Trajectory] Loaded dataset: ${DATA_URL} (${flights.length} flights)`);
 
-    const { slider, label } = ensureControlsExist();
+const slider = document.getElementById("time");
+const label = document.getElementById("label");
+const conflictsDiv = document.getElementById("conflicts");
+const conflictCountEl = document.getElementById("conflictCount");
+const hotspotsToggle = document.getElementById("hotspotsToggle");
 
-    const map = L.map("map", {
-      renderer: L.canvas(),
-      preferCanvas: true,
-    }).setView([56, -96], 4);
+if (!slider || !label || !conflictsDiv || !conflictCountEl) {
+  throw new Error("Missing UI elements (#time, #label, #conflicts, #conflictCount). Check index.html.");
+}
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 10,
-    }).addTo(map);
+const map = L.map("map", { renderer: L.canvas(), preferCanvas: true })
+  .setView([56, -96], 4);
 
-    let skipped = 0;
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 10 }).addTo(map);
 
-    const layers = [];
-    for (const f of flights) {
-      let pts = null;
-      try {
-        pts = buildPointsForFlight(f);
-      } catch (e) {
-        pts = null;
-      }
-      if (!pts) {
-        skipped++;
-        continue;
-      }
+// ---------- Build drawable flights ----------
+let skipped = 0;
+const layers = [];
 
-      const poly = L.polyline(pts, { weight: 2, opacity: 0.35 }).addTo(map);
-      poly.bindTooltip(
-        `${f.ACID} ${f["departure airport"]}→${f["arrival airport"]}<br>` +
-        `FL${Math.round((f.altitude || 0) / 100)} @ ${(f["aircraft speed"] || 0)}kt`
-      );
+for (const f of flights) {
+  let pts = null;
+  try {
+    const dep = AIRPORTS[f["departure airport"]];
+    const arr = AIRPORTS[f["arrival airport"]];
+    if (!dep || !arr) throw new Error("Unknown airport");
+    const mid = parseRoute(f.route);
+    pts = [dep, ...mid, arr];
+    if (pts.length < 2) throw new Error("Too few points");
+  } catch (e) {
+    skipped++;
+    continue;
+  }
 
-      const m = L.circleMarker(pts[0], { radius: 3, opacity: 0.9 }).addTo(map);
-      layers.push({ f, pts, m });
-    }
+  // route polyline (thin/transparent to handle scale)
+  const poly = L.polyline(pts, { weight: 2, opacity: 0.25 }).addTo(map);
+  poly.bindTooltip(
+    `${f.ACID} ${f["departure airport"]}→${f["arrival airport"]}<br>` +
+    `Alt ${f.altitude} ft @ ${f["aircraft speed"]} kt`
+  );
 
-    console.log(`[Trajectory] Rendered: ${layers.length} flights, skipped: ${skipped}`);
+  // aircraft marker
+  const m = L.circleMarker(pts[0], { radius: 3, opacity: 0.9 }).addTo(map);
 
-    if (layers.length > 0) {
-      // Fit map to data bounds for "something shows" guarantee
-      const allLatLngs = layers.flatMap((o) => o.pts);
-      map.fitBounds(allLatLngs, { padding: [20, 20] });
-    }
+  layers.push({ f, pts, poly, m });
+}
 
-    const times = layers.map((o) => o.f["departure time"]).filter((x) => Number.isFinite(x));
-    const minT = Math.min(...times);
-    const maxT = Math.max(...times) + 6 * 3600;
+console.log(`[Trajectory] Rendered: ${layers.length} flights, skipped: ${skipped}`);
 
-    slider.min = String(minT);
-    slider.max = String(maxT);
-    slider.step = "60";
-    slider.value = String(minT);
+if (layers.length > 0) {
+  const allLatLngs = layers.flatMap(o => o.pts);
+  map.fitBounds(allLatLngs, { padding: [20, 20] });
+}
 
-    function update() {
-      const t = parseInt(slider.value, 10);
-      label.textContent = `UTC: ${new Date(t * 1000).toISOString()}`;
+// ---------- Slider bounds ----------
+const times = layers.map(o => o.f["departure time"]).filter(Number.isFinite);
+const minT = Math.min(...times);
+const maxT = Math.max(...times) + 6 * 3600;
 
-      layers.forEach((o) => {
-        const p = positionAt(o.pts, o.f["departure time"], o.f["aircraft speed"], t);
-        if (!p) {
-          o.m.setStyle({ opacity: 0 });
-        } else {
-          o.m.setStyle({ opacity: 0.9 });
-          o.m.setLatLng(p);
-        }
+slider.min = String(minT);
+slider.max = String(maxT);
+slider.step = "60";
+slider.value = String(minT);
+
+// ---------- Conflict + hotspot layers ----------
+let conflictLines = []; // Leaflet polyline objects
+let hotspotRects = [];  // Leaflet rectangles
+
+function clearConflictLines() {
+  for (const l of conflictLines) map.removeLayer(l);
+  conflictLines = [];
+}
+
+function clearHotspots() {
+  for (const r of hotspotRects) map.removeLayer(r);
+  hotspotRects = [];
+}
+
+// Horizontal separation threshold: 5 NM
+const HSEP_NM = 5;
+// Vertical separation threshold: 2000 ft
+const VSEP_FT = 2000;
+
+// Compute a (cheap) active flight position snapshot at time t
+function computeSnapshot(tUnix) {
+  const snap = [];
+  for (const o of layers) {
+    const p = positionAt(o.pts, o.f["departure time"], o.f["aircraft speed"], tUnix);
+    if (!p) continue; // not departed yet
+    // NOTE: we clamp at arrival in positionAt. For MVP, treat as active.
+    snap.push({
+      obj: o,
+      latlon: p,
+      alt: o.f.altitude ?? 0
+    });
+  }
+  return snap;
+}
+
+// Build conflicts list for current time t
+function detectConflictsAtTime(tUnix) {
+  const snap = computeSnapshot(tUnix);
+
+  // Reset marker styles (default)
+  for (const o of layers) {
+    o.m.setStyle({ opacity: 0 }); // hidden unless active
+    o.m.setRadius(3);
+    o.m.setStyle({ fillOpacity: 0.8, opacity: 0.9 });
+  }
+
+  // Show active aircraft markers
+  for (const s of snap) {
+    s.obj.m.setStyle({ opacity: 0.9 });
+    s.obj.m.setLatLng(s.latlon);
+  }
+
+  const conflicts = [];
+  const n = snap.length;
+
+  // O(n^2) pairwise check — OK for ~1000 flights at a single time slice
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const a = snap[i], b = snap[j];
+      const h = haversineNm(a.latlon, b.latlon);
+      if (h >= HSEP_NM) continue;
+
+      const v = Math.abs((a.alt ?? 0) - (b.alt ?? 0));
+      if (v >= VSEP_FT) continue;
+
+      conflicts.push({
+        a: a.obj,
+        b: b.obj,
+        h_nm: h,
+        v_ft: v
       });
     }
+  }
 
-    slider.addEventListener("input", update);
-    update();
+  return { snap, conflicts };
+}
+
+// Render conflicts: red markers + red lines + right panel list
+function renderConflicts(tUnix, conflicts) {
+  clearConflictLines();
+  conflictsDiv.innerHTML = "";
+
+  conflictCountEl.textContent = `${conflicts.length}`;
+
+  if (conflicts.length === 0) {
+    conflictsDiv.innerHTML = `<div style="font-size:12px; color:#666;">No loss-of-separation at this time.</div>`;
+    return;
+  }
+
+  // Highlight involved aircraft (red and slightly larger)
+  const involved = new Set();
+  for (const c of conflicts) {
+    involved.add(c.a.f.ACID);
+    involved.add(c.b.f.ACID);
+  }
+
+  for (const o of layers) {
+    if (!o.m.options) continue;
+    if (involved.has(o.f.ACID)) {
+      o.m.setStyle({ color: "#c00", fillColor: "#c00", opacity: 1, fillOpacity: 0.9 });
+      o.m.setRadius(5);
+    } else {
+      // neutral active aircraft stay small and gray-ish
+      // (Leaflet default stroke is blue if you don’t set it; keep it subtle)
+      o.m.setStyle({ color: "#333", fillColor: "#333" });
+      o.m.setRadius(3);
+    }
+  }
+
+  // Draw red lines between conflicts and list them
+  for (const c of conflicts) {
+    const aPos = c.a.m.getLatLng();
+    const bPos = c.b.m.getLatLng();
+
+    const line = L.polyline([aPos, bPos], { color: "#c00", weight: 2, opacity: 0.9 }).addTo(map);
+    conflictLines.push(line);
+
+    const el = document.createElement("div");
+    el.style.border = "1px solid #eee";
+    el.style.borderRadius = "10px";
+    el.style.padding = "8px";
+    el.style.cursor = "pointer";
+    el.style.background = "#fff";
+
+    const aId = c.a.f.ACID;
+    const bId = c.b.f.ACID;
+    el.innerHTML = `
+      <div style="font-weight:600;">${aId} vs ${bId}</div>
+      <div style="font-size:12px; color:#555;">
+        H: ${c.h_nm.toFixed(2)} NM &nbsp;|&nbsp; V: ${Math.round(c.v_ft)} ft
+      </div>
+      <div style="font-size:12px; color:#777; margin-top:4px;">
+        ${c.a.f["departure airport"]}→${c.a.f["arrival airport"]} &nbsp; / &nbsp;
+        ${c.b.f["departure airport"]}→${c.b.f["arrival airport"]}
+      </div>
+    `;
+
+    el.onclick = () => {
+      // Zoom to the conflict
+      const bounds = L.latLngBounds([aPos, bPos]).pad(0.5);
+      map.fitBounds(bounds);
+    };
+
+    conflictsDiv.appendChild(el);
+  }
+}
+
+// Hotspot grid overlay at time t (simple density)
+function renderHotspots(tUnix) {
+  clearHotspots();
+  if (!hotspotsToggle || !hotspotsToggle.checked) return;
+
+  const snap = computeSnapshot(tUnix);
+
+  // grid size in degrees (tune: smaller = more detailed, heavier)
+  const cell = 1.0; // 1 degree grid
+  const counts = new Map();
+
+  function keyFor(lat, lon) {
+    const gx = Math.floor(lon / cell);
+    const gy = Math.floor(lat / cell);
+    return `${gy},${gx}`;
+  }
+
+  for (const s of snap) {
+    const [lat, lon] = s.latlon;
+    const k = keyFor(lat, lon);
+    counts.set(k, (counts.get(k) || 0) + 1);
+  }
+
+  // draw rectangles for cells with density >= 3
+  for (const [k, c] of counts.entries()) {
+    if (c < 3) continue;
+
+    const [gy, gx] = k.split(",").map(Number);
+    const lat0 = gy * cell;
+    const lon0 = gx * cell;
+    const lat1 = lat0 + cell;
+    const lon1 = lon0 + cell;
+
+    // opacity based on density (cap)
+    const op = Math.min(0.6, 0.15 + c * 0.05);
+
+    const rect = L.rectangle([[lat0, lon0], [lat1, lon1]], {
+      color: "#f80",
+      weight: 1,
+      opacity: 0.6,
+      fillOpacity: op
+    }).addTo(map);
+
+    hotspotRects.push(rect);
+  }
+}
+
+// ---------- Main update loop ----------
+function update() {
+  const t = parseInt(slider.value, 10);
+  label.textContent = `UTC: ${new Date(t * 1000).toISOString()}`;
+
+  const { conflicts } = detectConflictsAtTime(t);
+  renderConflicts(t, conflicts);
+  renderHotspots(t);
+}
+
+slider.addEventListener("input", update);
+if (hotspotsToggle) hotspotsToggle.addEventListener("change", update);
+update();
+
   })
   .catch((err) => {
     console.error("[Trajectory] Fatal error:", err);
