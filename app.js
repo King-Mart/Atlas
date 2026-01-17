@@ -65,6 +65,14 @@ function haversineNm(a, b) {
   return distKm * 0.5399568;
 }
 
+function routeDistanceNm(points) {
+  let d = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    d += haversineNm(points[i], points[i + 1]);
+  }
+  return d;
+}
+
 function positionAt(points, depUnix, speedKnots, tUnix) {
   const elapsed = tUnix - depUnix;
   if (elapsed < 0) return null;
@@ -160,7 +168,13 @@ for (const f of flights) {
   // aircraft marker
   const m = L.circleMarker(pts[0], { radius: 3, opacity: 0.9 }).addTo(map);
 
-  layers.push({ f, pts, poly, m });
+  // Precompute route distance and estimated arrival time (exclude arrived flights from active snapshots)
+  const totalDistNm = routeDistanceNm(pts);
+  const speedNmPerSec = (f["aircraft speed"] ?? 0) / 3600;
+  // If speed is not positive, mark arrivalTime as departure (treat as arrived) to avoid lingering active markers
+  const arrivalTime = f["departure time"] + (speedNmPerSec > 0 ? (totalDistNm / speedNmPerSec) : 0);
+
+  layers.push({ f, pts, poly, m, totalDistNm, arrivalTime });
 }
 
 console.log(`[Trajectory] Rendered: ${layers.length} flights, skipped: ${skipped}`);
@@ -203,9 +217,12 @@ const VSEP_FT = 2000;
 function computeSnapshot(tUnix) {
   const snap = [];
   for (const o of layers) {
-    const p = positionAt(o.pts, o.f["departure time"], o.f["aircraft speed"], tUnix);
-    if (!p) continue; // not departed yet
-    // NOTE: we clamp at arrival in positionAt. For MVP, treat as active.
+    const depUnix = o.f["departure time"];
+    if (tUnix < depUnix) continue; // not departed yet
+    // Exclude flights that have arrived at their final airport to avoid flagging landed aircraft as conflicts
+    if (typeof o.arrivalTime === 'number' && tUnix >= o.arrivalTime) continue;
+    const p = positionAt(o.pts, depUnix, o.f["aircraft speed"], tUnix);
+    if (!p) continue;
     snap.push({
       obj: o,
       latlon: p,
