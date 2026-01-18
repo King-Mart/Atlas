@@ -570,7 +570,14 @@ function refreshAnalyticsPanels(tUnix) {
   if (!window.Analytics || !flightsBase.length) return;
   // hotspots for next hour
   const tEnd = tUnix + 3600;
-  const hotspots = Analytics.computeHotspots3D(flightsBase, tUnix, tEnd, { cellNm: 25, cellFt: 2000, timeBucketSec: 300, airports: AIRPORTS });
+  const hotspots = Analytics.computeHotspots3D(flightsBase, tUnix, tEnd, { cellNm: 25, cellFt: 2000, timeBucketSec: 300, airports: AIRPORTS, edits });
+
+  // Clear previous hotspot visuals
+  if (!window._hotspotEntities) window._hotspotEntities = [];
+  function clearHotspotEntities() {
+    for (const e of window._hotspotEntities) viewer.entities.remove(e);
+    window._hotspotEntities = [];
+  }
 
   hotspotsDiv.innerHTML = '';
   if (!hotspots.length) {
@@ -582,15 +589,30 @@ function refreshAnalyticsPanels(tUnix) {
       el.innerHTML = `<div style="font-weight:600;">Score ${h.score} — ${h.traffic_count} flights</div>
         <div style="font-size:12px;color:#444;">Time: ${new Date(h.t*1000).toISOString().slice(11,16)} | Flights: ${h.flights.join(', ')}</div>`;
       el.onclick = () => {
-        // zoom to approximate cell center by averaging flight positions at that time
-        const t = h.t;
-        const snaps = Analytics.simulatePositions(flightsBase, t, edits, AIRPORTS);
-        const those = snaps.filter(s => h.flights.includes(s.f.ACID));
-        if (those.length) {
-          const avgLat = those.reduce((s,a)=>s+a.latlon[0],0)/those.length;
-          const avgLon = those.reduce((s,a)=>s+a.latlon[1],0)/those.length;
-          viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(avgLon, avgLat, 200000) });
-        }
+        // Fly to the hotspot cell center and render the exact cell bounds as an extruded rectangle
+        const centerLat = h.center_lat;
+        const centerLon = h.center_lon;
+        const west = h.west, east = h.east, south = h.south, north = h.north;
+        const altLowM = (h.alt_low_ft || 0) * 0.3048;
+        const altHighM = (h.alt_high_ft || 0) * 0.3048;
+
+        // fly to center (altitude chosen to show context)
+        const camAlt = Math.max(150000, (altHighM - altLowM) * 2 + 150000);
+        viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, camAlt) });
+
+        clearHotspotEntities();
+        // add rectangle entity matching the cell bounds and vertical extents
+        const rect = viewer.entities.add({
+          rectangle: {
+            coordinates: Cesium.Rectangle.fromDegrees(west, south, east, north),
+            material: Cesium.Color.ORANGE.withAlpha(0.25),
+            outline: true,
+            outlineColor: Cesium.Color.ORANGE,
+            height: altLowM,
+            extrudedHeight: altHighM
+          }
+        });
+        window._hotspotEntities.push(rect);
       };
       hotspotsDiv.appendChild(el);
     }
