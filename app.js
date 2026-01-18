@@ -4,6 +4,9 @@ const toggleLabels = document.getElementById("toggleLabels");
 const playBtn = document.getElementById("playBtn");
 const slider = document.getElementById("time");
 const label = document.getElementById("label");
+const jumpTimeInput = document.getElementById('jumpTime');
+const jumpBtn = document.getElementById('jumpBtn');
+const timeDisplay = document.getElementById('timeDisplay');
 const conflictsDiv = document.getElementById("conflicts");
 const conflictCountEl = document.getElementById("conflictCount");
 
@@ -78,6 +81,84 @@ const optimizeBtn = document.getElementById('optimizeBtn');
 const editsPanel = document.getElementById('editsPanel');
 const clearEditsBtn = document.getElementById('clearEditsBtn');
 const applyAllBtn = document.getElementById('applyAllBtn');
+const suggestionPanel = document.getElementById('suggestion');
+const suggestionBody = document.getElementById('suggestionBody');
+const suggestionClose = document.getElementById('suggestionClose');
+const suggestionHandle = document.getElementById('suggestionHandle');
+
+let dragActive = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let panelStartX = 0;
+let panelStartY = 0;
+
+function onDragMove(e) {
+  if (!dragActive || !suggestionPanel) return;
+  const dx = e.clientX - dragStartX;
+  const dy = e.clientY - dragStartY;
+  suggestionPanel.style.left = `${panelStartX + dx}px`;
+  suggestionPanel.style.top = `${panelStartY + dy}px`;
+}
+
+function onDragEnd() {
+  dragActive = false;
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
+}
+
+function onDragStart(e) {
+  if (!suggestionPanel) return;
+  const rect = suggestionPanel.getBoundingClientRect();
+  panelStartX = rect.left;
+  panelStartY = rect.top;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  // switch to left/top based positioning for dragging
+  suggestionPanel.style.right = '';
+  suggestionPanel.style.bottom = '';
+  suggestionPanel.style.left = `${panelStartX}px`;
+  suggestionPanel.style.top = `${panelStartY}px`;
+  dragActive = true;
+  document.addEventListener('mousemove', onDragMove);
+  document.addEventListener('mouseup', onDragEnd);
+  e.preventDefault();
+}
+
+function hideSuggestion() {
+  if (suggestionPanel) suggestionPanel.style.display = 'none';
+}
+
+function showSuggestion(conflict, tUnix) {
+  if (!suggestionPanel || !suggestionBody) return;
+  const a = conflict.a.obj.f;
+  const b = conflict.b.obj.f;
+  const timeStr = new Date(tUnix * 1000).toISOString();
+
+  suggestionBody.innerHTML = `
+    <div style="font-weight:700;">${a.ACID || 'Flight A'} ↔ ${b.ACID || 'Flight B'}</div>
+    <div style="font-size:12px;color:#ddd;">UTC ${timeStr}</div>
+    <div style="margin-top:6px;font-size:13px;">Horizontal separation: ${conflict.h_nm.toFixed(2)} NM (limit ${HSEP_NM} NM)</div>
+    <div style="font-size:13px;">Vertical separation: ${Math.round(conflict.v_ft)} ft (limit ${VSEP_FT} ft)</div>
+    <div style="margin-top:6px;font-size:13px;">Altitudes: ${(a.altitude || '?')} ft vs ${(b.altitude || '?')} ft</div>
+    <div style="font-size:13px;">Routes: ${(a['departure airport'] || '?')} → ${(a['arrival airport'] || '?')} | ${(b['departure airport'] || '?')} → ${(b['arrival airport'] || '?')}</div>
+  `;
+
+  suggestionPanel.style.display = 'block';
+}
+
+if (suggestionClose) suggestionClose.onclick = hideSuggestion;
+if (suggestionHandle) suggestionHandle.addEventListener('mousedown', onDragStart);
+
+
+// Inverse of projectKm() using the SAME lat0 as projectKm
+function unprojectKm(x, y, lat0 = 56) {
+  const toDeg = r => r * 180 / Math.PI;
+  const lat0Rad = lat0 * Math.PI / 180;
+
+  const lat = toDeg(y / R_KM);
+  const lon = toDeg(x / (Math.cos(lat0Rad) * R_KM));
+  return [lat, lon];
+}
 
 function renderEditsPanel() {
   editsPanel.innerHTML = '';
@@ -548,6 +629,7 @@ function detectConflictsAtTime(tUnix) {
 
 function renderConflicts(conflicts) {
   clearConflictLines();
+  hideSuggestion();
 
   conflictsDiv.innerHTML = "";
   conflictCountEl.textContent = String(conflicts.length);
@@ -588,6 +670,7 @@ function renderConflicts(conflicts) {
           new Cesium.Cartesian3()
         ),
       });
+      showSuggestion(c, parseInt(slider.value, 10));
     };
     conflictsDiv.appendChild(el);
   }
@@ -611,7 +694,14 @@ function refreshAnalyticsPanels(tUnix) {
   if (!window.Analytics || !flightsBase.length) return;
   // hotspots for next hour
   const tEnd = tUnix + 3600;
-  const hotspots = Analytics.computeHotspots3D(flightsBase, tUnix, tEnd, { cellNm: 25, cellFt: 2000, timeBucketSec: 300, airports: AIRPORTS });
+  const hotspots = Analytics.computeHotspots3D(flightsBase, tUnix, tEnd, { cellNm: 25, cellFt: 2000, timeBucketSec: 300, airports: AIRPORTS, edits });
+
+  // Clear previous hotspot visuals
+  if (!window._hotspotEntities) window._hotspotEntities = [];
+  function clearHotspotEntities() {
+    for (const e of window._hotspotEntities) viewer.entities.remove(e);
+    window._hotspotEntities = [];
+  }
 
   hotspotsDiv.innerHTML = '';
   if (!hotspots.length) {
@@ -623,15 +713,30 @@ function refreshAnalyticsPanels(tUnix) {
       el.innerHTML = `<div style="font-weight:600;">Score ${h.score} — ${h.traffic_count} flights</div>
         <div style="font-size:12px;color:#444;">Time: ${new Date(h.t*1000).toISOString().slice(11,16)} | Flights: ${h.flights.join(', ')}</div>`;
       el.onclick = () => {
-        // zoom to approximate cell center by averaging flight positions at that time
-        const t = h.t;
-        const snaps = Analytics.simulatePositions(flightsBase, t, edits, AIRPORTS);
-        const those = snaps.filter(s => h.flights.includes(s.f.ACID));
-        if (those.length) {
-          const avgLat = those.reduce((s,a)=>s+a.latlon[0],0)/those.length;
-          const avgLon = those.reduce((s,a)=>s+a.latlon[1],0)/those.length;
-          viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(avgLon, avgLat, 200000) });
-        }
+        // Fly to the hotspot cell center and render the exact cell bounds as an extruded rectangle
+        const centerLat = h.center_lat;
+        const centerLon = h.center_lon;
+        const west = h.west, east = h.east, south = h.south, north = h.north;
+        const altLowM = (h.alt_low_ft || 0) * 0.3048;
+        const altHighM = (h.alt_high_ft || 0) * 0.3048;
+
+        // fly to center (altitude chosen to show context)
+        const camAlt = Math.max(150000, (altHighM - altLowM) * 2 + 150000);
+        viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, camAlt) });
+
+        clearHotspotEntities();
+        // add rectangle entity matching the cell bounds and vertical extents
+        const rect = viewer.entities.add({
+          rectangle: {
+            coordinates: Cesium.Rectangle.fromDegrees(west, south, east, north),
+            material: Cesium.Color.ORANGE.withAlpha(0.25),
+            outline: true,
+            outlineColor: Cesium.Color.ORANGE,
+            height: altLowM,
+            extrudedHeight: altHighM
+          }
+        });
+        window._hotspotEntities.push(rect);
       };
       hotspotsDiv.appendChild(el);
     }
@@ -663,7 +768,9 @@ function refreshAnalyticsPanels(tUnix) {
 
 function update() {
   const t = parseInt(slider.value, 10);
-  label.textContent = `UTC: ${new Date(t * 1000).toISOString()}`;
+  const iso = new Date(t * 1000).toISOString();
+  label.textContent = `UTC: ${iso}`;
+  if (timeDisplay) timeDisplay.textContent = `${iso.replace('T',' ').replace('Z',' UTC')}`;
 
   const conflicts = detectConflictsAtTime(t);
   renderConflicts(conflicts);
@@ -674,6 +781,30 @@ function update() {
   refreshAnalyticsPanels(t);
 }
 updateFn = update;
+
+// jump button handler: accepts unix seconds or ISO timestamp
+if (jumpBtn) {
+  jumpBtn.onclick = () => {
+    const v = (jumpTimeInput && jumpTimeInput.value || '').trim();
+    if (!v) return;
+    let target = NaN;
+    if (/^\d+$/.test(v)) {
+      target = parseInt(v, 10);
+      // if it's a 13-digit ms timestamp, convert
+      if (String(v).length > 10) target = Math.floor(target / 1000);
+    } else {
+      const ms = Date.parse(v);
+      if (!isNaN(ms)) target = Math.floor(ms / 1000);
+    }
+    if (!isFinite(target)) { alert('Invalid time format. Use unix seconds or ISO UTC.'); return; }
+    // clamp to slider bounds
+    const minT = parseInt(slider.min, 10);
+    const maxT = parseInt(slider.max, 10);
+    const clamped = Math.max(minT, Math.min(maxT, target));
+    slider.value = String(clamped);
+    updateFn();
+  };
+}
 
 // --- Autoplay ---
 let playing = false;

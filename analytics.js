@@ -81,6 +81,13 @@
     return [x, y];
   }
 
+  function inverseProjectKm(x, y) {
+    const lat0 = 56 * Math.PI/180;
+    const lat = (y / R_km) * (180/Math.PI);
+    const lon = (x / (Math.cos(lat0) * R_km)) * (180/Math.PI);
+    return [lat, lon];
+  }
+
   // simulatePositions: returns array of { f, latlon, alt_ft, tUnix }
   function simulatePositions(flights, tUnix, edits = {}, airports) {
     const snap = [];
@@ -204,7 +211,20 @@
         if (b2.ix === b.ix && b2.iy === b.iy && b2.iz === b.iz && b2.snaps.length >= traffic_count) repeat++;
       }
       const confidence = total ? repeat / total : 0;
-      res.push({ key: k, t: b.t, ix: b.ix, iy: b.iy, iz: b.iz, traffic_count, conflict_count, flow_count: flows.size, score, flights: Array.from(flightsSet), confidence });
+      // compute cell geometry in lat/lon
+      const west_x = b.ix * cellKm;
+      const east_x = (b.ix + 1) * cellKm;
+      const south_y = b.iy * cellKm;
+      const north_y = (b.iy + 1) * cellKm;
+      const [south_lat, west_lon] = inverseProjectKm(west_x, south_y);
+      const [north_lat, east_lon] = inverseProjectKm(east_x, north_y);
+      const center_x = (west_x + east_x) / 2;
+      const center_y = (south_y + north_y) / 2;
+      const [center_lat, center_lon] = inverseProjectKm(center_x, center_y);
+      const alt_low_ft = b.iz * cellFt;
+      const alt_high_ft = (b.iz + 1) * cellFt;
+
+      res.push({ key: k, t: b.t, ix: b.ix, iy: b.iy, iz: b.iz, traffic_count, conflict_count, flow_count: flows.size, score, flights: Array.from(flightsSet), confidence, center_lat, center_lon, west: west_lon, east: east_lon, south: south_lat, north: north_lat, alt_low_ft, alt_high_ft });
     }
 
     res.sort((a, b) => b.score - a.score);

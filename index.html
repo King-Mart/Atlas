@@ -14,6 +14,16 @@
         box-shadow: 0 10px 24px rgba(0,0,0,0.15);
       }
       #conflicts { max-height: 220px; overflow: auto; font-size: 12px; }
+      #suggestion {
+        position: absolute; top: 64px; right: 12px; z-index: 10;
+        width: 320px; padding: 12px;
+        background: rgba(15, 18, 25, 0.9); color: #fff;
+        border-radius: 10px; box-shadow: 0 10px 24px rgba(0,0,0,0.3);
+        font-family: system-ui; display: none;
+      }
+      #suggestion h4 { margin: 0 0 6px 0; }
+      #suggestion .close { float: right; cursor: pointer; border: none; background: transparent; color: #fff; font-size: 14px; }
+      #suggestion .drag { cursor: move; user-select: none; }
       .row { padding: 6px; border: 1px solid #eee; border-radius: 8px; margin: 6px 0; cursor: pointer; }
       .muted { color:#666; font-size:12px; }
       button { cursor: pointer; }
@@ -42,6 +52,11 @@
           <button id="playBtn">▶ Play</button>
           <div id="label" class="muted"></div>
         </div>
+        <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
+          <input id="jumpTime" type="text" placeholder="UTC ISO (e.g. 2026-01-18T12:34:00Z) or unix" style="flex:1;padding:6px;border-radius:6px;border:1px solid #ddd;" />
+          <button id="jumpBtn" style="font-size:12px;">Go</button>
+        </div>
+        <div id="timeDisplay" style="margin-top:6px;font-weight:700;font-size:13px;color:#222;"></div>
       </div>
 
       <hr />
@@ -76,6 +91,13 @@
       <div id="editsPanel" style="max-height:160px; overflow:auto; font-size:12px; margin-top:6px;"></div>
     </div>
 
+    <div id="suggestion">
+      <div id="suggestionHandle" class="drag" style="display:flex;justify-content:space-between;align-items:center;">
+        <h4 style="margin:0; font-size:14px;">Conflict Detail</h4>
+        <button id="suggestionClose" class="close" aria-label="Close">✕</button>
+      </div>
+      <div id="suggestionBody" class="muted">Select a conflict to view details.</div>
+    </div>
     <!-- 1️⃣ Charger Sentry EN PREMIER -->
     <script
       src="https://js.sentry-cdn.com/558b416aa6680796827d32a9ab5a3caf.min.js"
