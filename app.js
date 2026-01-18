@@ -78,6 +78,73 @@ const optimizeBtn = document.getElementById('optimizeBtn');
 const editsPanel = document.getElementById('editsPanel');
 const clearEditsBtn = document.getElementById('clearEditsBtn');
 const applyAllBtn = document.getElementById('applyAllBtn');
+const suggestionPanel = document.getElementById('suggestion');
+const suggestionBody = document.getElementById('suggestionBody');
+const suggestionClose = document.getElementById('suggestionClose');
+const suggestionHandle = document.getElementById('suggestionHandle');
+
+let dragActive = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let panelStartX = 0;
+let panelStartY = 0;
+
+function onDragMove(e) {
+  if (!dragActive || !suggestionPanel) return;
+  const dx = e.clientX - dragStartX;
+  const dy = e.clientY - dragStartY;
+  suggestionPanel.style.left = `${panelStartX + dx}px`;
+  suggestionPanel.style.top = `${panelStartY + dy}px`;
+}
+
+function onDragEnd() {
+  dragActive = false;
+  document.removeEventListener('mousemove', onDragMove);
+  document.removeEventListener('mouseup', onDragEnd);
+}
+
+function onDragStart(e) {
+  if (!suggestionPanel) return;
+  const rect = suggestionPanel.getBoundingClientRect();
+  panelStartX = rect.left;
+  panelStartY = rect.top;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+  // switch to left/top based positioning for dragging
+  suggestionPanel.style.right = '';
+  suggestionPanel.style.bottom = '';
+  suggestionPanel.style.left = `${panelStartX}px`;
+  suggestionPanel.style.top = `${panelStartY}px`;
+  dragActive = true;
+  document.addEventListener('mousemove', onDragMove);
+  document.addEventListener('mouseup', onDragEnd);
+  e.preventDefault();
+}
+
+function hideSuggestion() {
+  if (suggestionPanel) suggestionPanel.style.display = 'none';
+}
+
+function showSuggestion(conflict, tUnix) {
+  if (!suggestionPanel || !suggestionBody) return;
+  const a = conflict.a.obj.f;
+  const b = conflict.b.obj.f;
+  const timeStr = new Date(tUnix * 1000).toISOString();
+
+  suggestionBody.innerHTML = `
+    <div style="font-weight:700;">${a.ACID || 'Flight A'} ↔ ${b.ACID || 'Flight B'}</div>
+    <div style="font-size:12px;color:#ddd;">UTC ${timeStr}</div>
+    <div style="margin-top:6px;font-size:13px;">Horizontal separation: ${conflict.h_nm.toFixed(2)} NM (limit ${HSEP_NM} NM)</div>
+    <div style="font-size:13px;">Vertical separation: ${Math.round(conflict.v_ft)} ft (limit ${VSEP_FT} ft)</div>
+    <div style="margin-top:6px;font-size:13px;">Altitudes: ${(a.altitude || '?')} ft vs ${(b.altitude || '?')} ft</div>
+    <div style="font-size:13px;">Routes: ${(a['departure airport'] || '?')} → ${(a['arrival airport'] || '?')} | ${(b['departure airport'] || '?')} → ${(b['arrival airport'] || '?')}</div>
+  `;
+
+  suggestionPanel.style.display = 'block';
+}
+
+if (suggestionClose) suggestionClose.onclick = hideSuggestion;
+if (suggestionHandle) suggestionHandle.addEventListener('mousedown', onDragStart);
 
 function renderEditsPanel() {
   editsPanel.innerHTML = '';
@@ -496,6 +563,7 @@ function detectConflictsAtTime(tUnix) {
 
 function renderConflicts(conflicts) {
   clearConflictLines();
+  hideSuggestion();
 
   conflictsDiv.innerHTML = "";
   conflictCountEl.textContent = String(conflicts.length);
@@ -536,6 +604,7 @@ function renderConflicts(conflicts) {
           new Cesium.Cartesian3()
         ),
       });
+      showSuggestion(c, parseInt(slider.value, 10));
     };
     conflictsDiv.appendChild(el);
   }
