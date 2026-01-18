@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Trajectory Insight MVP</title>
+  <link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+/>
+
+<style>
+  html, body { height: 100%; margin: 0; }
+  #map { height: 100vh; width: 100%; }
+</style>
+
+</head>
+<body>
+  <div style="display:flex; height:100vh;">
+    <div id="map" style="flex:1;"></div>
+
+    <div id="sidebar" style="width:360px; border-left:1px solid #ddd; padding:12px; overflow:auto; font-family:system-ui;">
+      <div style="font-weight:700; font-size:16px; margin-bottom:8px;">Trajectory Insight</div>
+
+      <label style="display:flex; align-items:center; gap:8px; margin:8px 0;">
+        <input id="hotspotsToggle" type="checkbox" />
+        Show hotspots (grid)
+      </label>
+
+      <div style="margin:8px 0;">
+        <div style="font-size:12px; color:#555; margin-bottom:4px;">Time (UTC)</div>
+        <input id="time" type="range" style="width:100%;" />
+        <div id="label" style="margin-top:6px; font-size:12px; color:#333;"></div>
+      </div>
+
+      <hr style="margin:12px 0;" />
+
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div style="font-weight:600;">Conflicts</div>
+        <div id="conflictCount" style="font-size:12px; color:#555;">0</div>
+      </div>
+      <div id="conflicts" style="margin-top:8px; display:flex; flex-direction:column; gap:8px;"></div>
+    </div>
+  </div>
+  <script
+  src="https://js.sentry-cdn.com/cae4a94be4b244c3726a8455f12a5af4.min.js"
+  crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

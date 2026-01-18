@@ -11,48 +11,38 @@
         position: absolute; top: 12px; left: 12px; z-index: 10;
         background: rgba(255,255,255,0.92); padding: 10px; border-radius: 10px;
         font-family: system-ui; width: 360px;
-        box-shadow: 0 10px 24px rgba(0,0,0,0.15);
       }
       #conflicts { max-height: 220px; overflow: auto; font-size: 12px; }
       .row { padding: 6px; border: 1px solid #eee; border-radius: 8px; margin: 6px 0; cursor: pointer; }
-      .muted { color:#666; font-size:12px; }
-      button { cursor: pointer; }
     </style>
   </head>
   <body>
     <div id="cesiumContainer"></div>
-
     <div id="ui">
-      <div style="display:flex; gap:10px; font-size:12px; margin-top:6px; align-items:center;">
+      <div style="display:flex; gap:10px; font-size:12px; margin-top:6px;">
         <label><input id="toggleRoutes" type="checkbox" checked> Routes</label>
         <label><input id="toggleLabels" type="checkbox"> Labels</label>
+        
       </div>
 
-      <div style="font-weight:700; margin-top:6px;">3D Trajectory Insight</div>
-
+      <div style="font-weight:700;">3D Trajectory Insight</div>
       <div style="margin:8px 0;">
-        <div class="muted">Dataset</div>
+        <div style="font-size:12px;color:#555;">Dataset</div>
         <div id="dataset"></div>
       </div>
-
       <div style="margin:8px 0;">
-        <div class="muted">Time (UTC)</div>
+        <div style="font-size:12px;color:#555;">Time (UTC)</div>
         <input id="time" type="range" style="width:100%;" />
-        <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
-          <button id="playBtn">▶ Play</button>
-          <div id="label" class="muted"></div>
-        </div>
+        <button id="playBtn" style="margin-top:6px;">▶ Play</button>
+        <div id="label" style="font-size:12px;color:#333;margin-top:6px;"></div>
       </div>
-
       <hr />
-
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <div style="font-weight:600;">Conflicts</div>
-        <div id="conflictCount" class="muted">0</div>
+        <div id="conflictCount" style="font-size:12px;color:#555;">0</div>
       </div>
       <div id="conflicts"></div>
     </div>
-
     <script src="app.js"></script>
   </body>
 </html>
