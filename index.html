@@ -71,12 +71,29 @@
           <button id="clearEditsBtn" style="font-size:12px;margin-left:6px;">Clear Edits</button>
           <button id="demoBtn">Run Demo</button>
           <div id="narration"></div>
-
         </div>
       </div>
       <div id="editsPanel" style="max-height:160px; overflow:auto; font-size:12px; margin-top:6px;"></div>
-
     </div>
+
+    <!-- 1️⃣ Charger Sentry EN PREMIER -->
+    <script
+      src="https://js.sentry-cdn.com/558b416aa6680796827d32a9ab5a3caf.min.js"
+      crossorigin="anonymous"
+    ></script>
+
+    <!-- 2️⃣ Initialisation Sentry -->
+    <script>
+      Sentry.onLoad(function () {
+        Sentry.init({
+          // ⚠️ Mets ton DSN ici (Project Settings -> Client Keys (DSN))
+          // dsn: "https://PUBLIC_KEY@oXXXX.ingest.sentry.io/PROJECT_ID",
+          environment: "dev",
+          // utile pour regrouper un peu mieux
+          release: "sky-web@dev",
+        });
+      });
+    </script>
 
     <script src="analytics.js"></script>
     <script src="app.js"></script>
