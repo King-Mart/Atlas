@@ -79,6 +79,17 @@ const editsPanel = document.getElementById('editsPanel');
 const clearEditsBtn = document.getElementById('clearEditsBtn');
 const applyAllBtn = document.getElementById('applyAllBtn');
 
+
+// Inverse of projectKm() using the SAME lat0 as projectKm
+function unprojectKm(x, y, lat0 = 56) {
+  const toDeg = r => r * 180 / Math.PI;
+  const lat0Rad = lat0 * Math.PI / 180;
+
+  const lat = toDeg(y / R_KM);
+  const lon = toDeg(x / (Math.cos(lat0Rad) * R_KM));
+  return [lat, lon];
+}
+
 function renderEditsPanel() {
   editsPanel.innerHTML = '';
   // Suggestions
