@@ -10,7 +10,7 @@ const conflictCountEl = document.getElementById("conflictCount");
 // Dataset
 function getDatasetUrl() {
   const params = new URLSearchParams(window.location.search);
-  return params.get("data") || "canadian_flights_50.json";
+  return params.get("data") || "canadian_flights_1000.json";
 }
 const DATA_URL = getDatasetUrl();
 const datasetEl = document.getElementById("dataset");
@@ -65,6 +65,67 @@ const VSEP_FT = 2000;
 // Entities tracking
 let flightObjs = []; // { f, ptsLL, altM, routeEntity, planeEntity, planeEntityTop }
 let conflictLineEntities = [];
+
+// Analytics / scenario state
+let flightsBase = []; // raw flights loaded
+let edits = {}; // ACID -> { departure_time_delta: seconds, altitude_delta_ft }
+let suggestedEdits = {}; // results from optimizer (not applied until user clicks)
+
+// UI nodes
+const hotspotsDiv = document.getElementById('hotspots');
+const airportLoadDiv = document.getElementById('airportLoad');
+const optimizeBtn = document.getElementById('optimizeBtn');
+const editsPanel = document.getElementById('editsPanel');
+const clearEditsBtn = document.getElementById('clearEditsBtn');
+const applyAllBtn = document.getElementById('applyAllBtn');
+
+function renderEditsPanel() {
+  editsPanel.innerHTML = '';
+  // Suggestions
+  const hSugg = document.createElement('div');
+  hSugg.style.marginBottom = '6px';
+  hSugg.innerHTML = `<div style="font-weight:600;">Suggested edits</div>`;
+  editsPanel.appendChild(hSugg);
+  if (!Object.keys(suggestedEdits).length) {
+    const el = document.createElement('div'); el.className='muted'; el.textContent='No suggestions'; editsPanel.appendChild(el);
+  } else {
+    for (const ac of Object.keys(suggestedEdits)) {
+      const s = suggestedEdits[ac];
+      const el = document.createElement('div'); el.className='row';
+      el.innerHTML = `<div style="font-weight:600;">${ac}</div>
+        <div style="font-size:12px;color:#444;">${s.departure_time_delta ? 'Delay: ' + (s.departure_time_delta/60)+' min' : ''} ${s.altitude_delta_ft ? 'Alt: ' + s.altitude_delta_ft + ' ft' : ''}</div>`;
+      const applyBtn = document.createElement('button'); applyBtn.textContent='Apply'; applyBtn.style.marginLeft='6px';
+      applyBtn.onclick = () => { edits[ac] = Object.assign({}, edits[ac]||{}, s); suggestedEdits = {}; renderEditsPanel(); updateFn(); };
+      el.appendChild(applyBtn);
+      editsPanel.appendChild(el);
+    }
+  }
+
+  // Applied edits
+  const hApplied = document.createElement('div');
+  hApplied.style.marginTop = '8px';
+  hApplied.innerHTML = `<div style="font-weight:600;">Applied edits</div>`;
+  editsPanel.appendChild(hApplied);
+  if (!Object.keys(edits).length) {
+    const el = document.createElement('div'); el.className='muted'; el.textContent='No applied edits'; editsPanel.appendChild(el);
+  } else {
+    for (const ac of Object.keys(edits)) {
+      const s = edits[ac];
+      const el = document.createElement('div'); el.className='row';
+      el.innerHTML = `<div style="font-weight:600;">${ac}</div>
+        <div style="font-size:12px;color:#444;">${s.departure_time_delta ? 'Delay: ' + (s.departure_time_delta/60)+' min' : ''} ${s.altitude_delta_ft ? 'Alt: ' + s.altitude_delta_ft + ' ft' : ''}</div>`;
+      const undoBtn = document.createElement('button'); undoBtn.textContent='Undo'; undoBtn.style.marginLeft='6px';
+      undoBtn.onclick = () => { delete edits[ac]; renderEditsPanel(); updateFn(); };
+      el.appendChild(undoBtn);
+      editsPanel.appendChild(el);
+    }
+  }
+}
+
+if (clearEditsBtn) clearEditsBtn.onclick = () => { edits = {}; suggestedEdits = {}; renderEditsPanel(); updateFn(); };
+if (applyAllBtn) applyAllBtn.onclick = () => { edits = Object.assign({}, edits, suggestedEdits); suggestedEdits = {}; renderEditsPanel(); updateFn(); };
+
+
 
 // --- Helpers ---
 function parseCoord(s) {
@@ -133,23 +194,37 @@ function positionAt(points, depUnix, speedKnots, tUnix) {
 
   let dist = elapsed * (speedKnots / 3600); // nm
 
+  // total distance
   let total = 0;
-  for (let i = 0; i < points.length - 1; i++) {
-    total += haversineNm(points[i], points[i + 1]);
-  }
-  if (dist >= total) return null;
+  for (let i = 0; i < points.length - 1; i++) total += haversineNm(points[i], points[i + 1]);
+
+  if (dist >= total) return null; // ✅ inactive after arrival (fixes airport pileups)
 
   for (let i = 0; i < points.length - 1; i++) {
     const leg = haversineNm(points[i], points[i + 1]);
     if (leg <= 0) continue;
     if (dist <= leg) {
       const f = dist / leg;
-      return geodesicInterpolateLL(points[i], points[i + 1], f);
+      return [
+        points[i][0] + (points[i + 1][0] - points[i][0]) * f,
+        points[i][1] + (points[i + 1][1] - points[i][1]) * f,
+      ];
     }
     dist -= leg;
   }
   return null;
 }
+
+const AIRPORT_RADIUS_NM = 15;
+
+function nearAnyAirport(latlon) {
+  for (const code in AIRPORTS) {
+    const a = AIRPORTS[code];
+    if (haversineNm(latlon, a) <= AIRPORT_RADIUS_NM) return true;
+  }
+  return false;
+}
+
 
 // --- Rendering ---
 function clearConflictLines() {
@@ -237,9 +312,13 @@ function computeSnapshot(tUnix) {
   const snap = [];
 
   for (const o of flightObjs) {
+    const edit = edits[o.f.ACID] || {};
+    const dep = o.f["departure time"] + (edit.departure_time_delta || 0);
+    const altFtDelta = edit.altitude_delta_ft || 0;
+
     const pLL = positionAt(
       o.ptsLL,
-      o.f["departure time"],
+      dep,
       o.f["aircraft speed"],
       tUnix
     );
@@ -253,7 +332,8 @@ function computeSnapshot(tUnix) {
     }
 
     // active -> show plane(s)
-    const pos = llToCartesian(pLL[0], pLL[1], o.altM);
+    const altM = o.altM + altFtDelta * 0.3048;
+    const pos = llToCartesian(pLL[0], pLL[1], altM);
 
     o.planeEntity.show = true;
     o.planeEntityTop.show = true;
@@ -274,22 +354,125 @@ function computeSnapshot(tUnix) {
     snap.push({
       obj: o,
       latlon: pLL,
-      alt: Number(o.f.altitude || 0),
+      alt: Number(o.f.altitude || 0) + altFtDelta,
       pos,
     });
   }
 
   return snap;
 }
+let hotspotEntities = [];
+
+function clearHotspots(viewer) {
+  for (const e of hotspotEntities) viewer.entities.remove(e);
+  hotspotEntities = [];
+}
+
+function renderHotspots(viewer, snapshot) {
+  clearHotspots(viewer);
+
+  // bin size (degrees)
+  const BIN = 2.0;
+  const bins = new Map();
+
+  for (const s of snapshot) {
+    const lat = s.latlon[0], lon = s.latlon[1];
+    const keyLat = Math.floor(lat / BIN) * BIN;
+    const keyLon = Math.floor(lon / BIN) * BIN;
+    const key = `${keyLat},${keyLon}`;
+    bins.set(key, (bins.get(key) || 0) + 1);
+  }
+
+  // top bins
+  const top = [...bins.entries()]
+    .map(([k, count]) => ({ k, count }))
+    .sort((a,b) => b.count - a.count)
+    .slice(0, 8);
+
+  for (const { k, count } of top) {
+    const [lat, lon] = k.split(",").map(Number);
+    const height = 20000 * count; // meters (tweak)
+    const pos = Cesium.Cartesian3.fromDegrees(lon + BIN/2, lat + BIN/2, height/2);
+
+    const e = viewer.entities.add({
+      position: pos,
+      box: {
+        dimensions: new Cesium.Cartesian3(150000, 150000, height),
+        material: Cesium.Color.ORANGE.withAlpha(0.35),
+        outline: true,
+        outlineColor: Cesium.Color.ORANGE.withAlpha(0.8)
+      },
+      label: {
+        text: `${count}`,
+        font: "14px sans-serif",
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -20),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY
+      }
+    });
+    hotspotEntities.push(e);
+  }
+}
+const DEMO = [
+  { label: "Morning push: departures ramp up", tOffsetMin: 0, camera: { lon:-79.63, lat:43.68, h:2500000 } },
+  { label: "Hotspot corridor forms (Ontario)", tOffsetMin: 35, camera: { lon:-84.0, lat:46.0, h:1800000 } },
+  { label: "Loss-of-separation detected", tOffsetMin: 55, camera: { lon:-78.03, lat:45.88, h:900000 } },
+  { label: "Apply fix: delay one flight +5 min", tOffsetMin: 60, action: "applyFix" },
+  { label: "After: conflict resolved", tOffsetMin: 65, camera: { lon:-78.03, lat:45.88, h:900000 } },
+];
+
+let demoTimer = null;
+
+function fly(camera) {
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromDegrees(camera.lon, camera.lat, camera.h),
+    duration: 1.2
+  });
+}
+
+function setNarration(text) {
+  const el = document.getElementById("narration");
+  if (el) el.textContent = text;
+}
+
+function runDemo(baseUnix) {
+  let i = 0;
+  clearInterval(demoTimer);
+  demoTimer = setInterval(() => {
+    if (i >= DEMO.length) { clearInterval(demoTimer); demoTimer = null; return; }
+    const step = DEMO[i++];
+
+    setNarration(step.label);
+    const t = baseUnix + step.tOffsetMin * 60;
+    slider.value = String(t);
+    update();
+
+    if (step.camera) fly(step.camera);
+
+    if (step.action === "applyFix") {
+      // simplest demo fix: shift one known flight by +5 min
+      // (you can choose the first conflicted flight instead)
+      const target = flightObjs.find(o => (o.f.ACID || "").includes("ACA"));
+      if (target) target.f["departure time"] += 5 * 60;
+    }
+  }, 1800);
+}
+
 
 function detectConflictsAtTime(tUnix) {
   const snap = computeSnapshot(tUnix);
+  renderHotspots(viewer, snap);
 
   const conflicts = [];
   for (let i = 0; i < snap.length; i++) {
     for (let j = i + 1; j < snap.length; j++) {
       const a = snap[i],
-        b = snap[j];
+      b = snap[j];
+      if (nearAnyAirport(a.latlon) || nearAnyAirport(b.latlon)) continue;
+
       const h = haversineNm(a.latlon, b.latlon);
       if (h >= HSEP_NM) continue;
       const v = Math.abs(a.alt - b.alt);
@@ -372,6 +555,60 @@ function setTimeBoundsFromFlights(flights) {
   slider.value = String(minT);
 }
 
+function refreshAnalyticsPanels(tUnix) {
+  if (!window.Analytics || !flightsBase.length) return;
+  // hotspots for next hour
+  const tEnd = tUnix + 3600;
+  const hotspots = Analytics.computeHotspots3D(flightsBase, tUnix, tEnd, { cellNm: 25, cellFt: 2000, timeBucketSec: 300, airports: AIRPORTS });
+
+  hotspotsDiv.innerHTML = '';
+  if (!hotspots.length) {
+    hotspotsDiv.innerHTML = '<div class="muted">No hotspots in next hour.</div>';
+  } else {
+    for (const h of hotspots.slice(0,8)) {
+      const el = document.createElement('div');
+      el.className = 'row';
+      el.innerHTML = `<div style="font-weight:600;">Score ${h.score} — ${h.traffic_count} flights</div>
+        <div style="font-size:12px;color:#444;">Time: ${new Date(h.t*1000).toISOString().slice(11,16)} | Flights: ${h.flights.join(', ')}</div>`;
+      el.onclick = () => {
+        // zoom to approximate cell center by averaging flight positions at that time
+        const t = h.t;
+        const snaps = Analytics.simulatePositions(flightsBase, t, edits, AIRPORTS);
+        const those = snaps.filter(s => h.flights.includes(s.f.ACID));
+        if (those.length) {
+          const avgLat = those.reduce((s,a)=>s+a.latlon[0],0)/those.length;
+          const avgLon = those.reduce((s,a)=>s+a.latlon[1],0)/those.length;
+          viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(avgLon, avgLat, 200000) });
+        }
+      };
+      hotspotsDiv.appendChild(el);
+    }
+  }
+
+  // airport load: window +/- 15min
+  const apLoads = Analytics.computeAirportLoad(flightsBase, tUnix-900, tUnix+900, 900);
+  airportLoadDiv.innerHTML = '';
+  // compute top windows by ops
+  const rows = [];
+  for (const ap of Object.keys(apLoads)) {
+    for (const w of apLoads[ap]) {
+      rows.push({ ap, windowStart: w.windowStart, ops: w.deps + w.arrs, deps: w.deps, arrs: w.arrs });
+    }
+  }
+  rows.sort((a,b)=>b.ops - a.ops);
+  for (const r of rows.slice(0,6)) {
+    const el = document.createElement('div');
+    el.className = 'row';
+    el.innerHTML = `<div style="font-weight:600;">${r.ap} — ${r.ops} ops</div>
+      <div style="font-size:12px;color:#444;">Deps: ${r.deps} | Arrs: ${r.arrs} | ${new Date(r.windowStart*1000).toISOString().slice(11,16)}</div>`;
+    el.onclick = () => {
+      const coords = AIRPORTS[r.ap];
+      if (coords) viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(coords[1], coords[0], 150000) });
+    };
+    airportLoadDiv.appendChild(el);
+  }
+}
+
 function update() {
   const t = parseInt(slider.value, 10);
   label.textContent = `UTC: ${new Date(t * 1000).toISOString()}`;
@@ -380,6 +617,9 @@ function update() {
   renderConflicts(conflicts);
 
   applyToggles();
+
+  // refresh analytics panels
+  refreshAnalyticsPanels(t);
 }
 updateFn = update;
 
@@ -420,13 +660,38 @@ fetch(DATA_URL)
     return r.json();
   })
   .then((flights) => {
+    flightsBase = flights;
     renderFlights(flights);
     setTimeBoundsFromFlights(flights);
 
     slider.addEventListener("input", updateFn);
     updateFn();
+
+    if (optimizeBtn) {
+      optimizeBtn.onclick = async () => {
+        optimizeBtn.disabled = true;
+        optimizeBtn.textContent = 'Optimizing...';
+        try {
+          const res = await Analytics.optimizeSchedule(flightsBase, { K: 30, airports: AIRPORTS });
+          edits = res.edits || {};
+          // show quick summary
+          hotspotsDiv.innerHTML = `<div style="font-weight:600;">Optimization complete</div>
+            <div class="muted">Conflicts: ${res.baseMetrics.conflicts} → ${res.finalMetrics.conflicts}</div>
+            <div class="muted">Avg delay (min): ${((res.finalMetrics.total_delay_minutes||0)/Object.keys(res.edits||{}).length||0).toFixed(2)}</div>`;
+          // re-render frame
+          updateFn();
+        } catch (e) {
+          console.error(e);
+          alert('Optimization failed: ' + e.message);
+        } finally {
+          optimizeBtn.disabled = false;
+          optimizeBtn.textContent = 'Optimize (K=30)';
+        }
+      };
+    }
   })
   .catch((err) => {
     console.error(err);
     label.textContent = "Error: " + err.message;
   });
+demoBtn.onclick = () => runDemo(parseInt(slider.min, 10));

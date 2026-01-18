@@ -51,8 +51,34 @@
         <div id="conflictCount" class="muted">0</div>
       </div>
       <div id="conflicts"></div>
+
+      <hr />
+
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-weight:600;">Top Hotspots</div>
+        <button id="optimizeBtn" style="font-size:12px;">Optimize (K=30)</button>
+      </div>
+      <div id="hotspots" style="max-height:150px; overflow:auto; font-size:12px; margin-top:6px;"></div>
+
+      <div style="margin-top:8px; font-weight:600;">Airport Load</div>
+      <div id="airportLoad" style="max-height:120px; overflow:auto; font-size:12px; margin-top:6px;"></div>
+
+      <hr />
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-weight:600;">Edits (scenario)</div>
+        <div>
+          <button id="applyAllBtn" style="font-size:12px;">Apply All</button>
+          <button id="clearEditsBtn" style="font-size:12px;margin-left:6px;">Clear Edits</button>
+          <button id="demoBtn">Run Demo</button>
+          <div id="narration"></div>
+
+        </div>
+      </div>
+      <div id="editsPanel" style="max-height:160px; overflow:auto; font-size:12px; margin-top:6px;"></div>
+
     </div>
 
+    <script src="analytics.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
