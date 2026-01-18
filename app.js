@@ -207,6 +207,53 @@ if (clearEditsBtn) clearEditsBtn.onclick = () => { edits = {}; suggestedEdits = 
 if (applyAllBtn) applyAllBtn.onclick = () => { edits = Object.assign({}, edits, suggestedEdits); suggestedEdits = {}; renderEditsPanel(); updateFn(); };
 
 
+// -----------------------------------------------------------------------------
+// ✅ SENTRY: logger non-bloquant des conflits + anti-spam
+// -----------------------------------------------------------------------------
+
+// cache global : évite d'envoyer le même conflit trop souvent
+window.__conflictSentryCache = window.__conflictSentryCache || new Map();
+
+/**
+ * Envoie un "warning" à Sentry (NON bloquant).
+ * Anti-spam : même pair de vols => 1 event max toutes les 5 minutes.
+ */
+function logConflictToSentry(conflict, tUnix) {
+  if (!window.Sentry) return;
+
+  const aId = conflict.a?.obj?.f?.ACID || "UNKNOWN_A";
+  const bId = conflict.b?.obj?.f?.ACID || "UNKNOWN_B";
+
+  // clé stable (A|B trié)
+  const pair = [aId, bId].sort().join("|");
+  const key = `${pair}`;
+
+  const now = tUnix || Math.floor(Date.now() / 1000);
+  const last = window.__conflictSentryCache.get(key) || 0;
+
+  // throttle: 5 minutes
+  if (now - last < 300) return;
+  window.__conflictSentryCache.set(key, now);
+
+  Sentry.captureMessage("Loss of separation detected", {
+    level: "warning", // 👈 NON BLOQUANT
+    fingerprint: ["air_traffic_conflict", pair], // regroupe par pair
+    tags: {
+      type: "air_traffic_conflict",
+      source: "conflict_detector",
+    },
+    extra: {
+      time_utc: new Date(now * 1000).toISOString(),
+      flight_A: aId,
+      flight_B: bId,
+      horizontal_nm: conflict.h_nm,
+      vertical_ft: conflict.v_ft,
+      altitude_A_ft: conflict.a?.alt,
+      altitude_B_ft: conflict.b?.alt,
+      dataset: typeof DATA_URL !== "undefined" ? DATA_URL : undefined,
+    },
+  });
+}
 
 // --- Helpers ---
 function parseCoord(s) {
@@ -558,7 +605,12 @@ function detectConflictsAtTime(tUnix) {
       if (h >= HSEP_NM) continue;
       const v = Math.abs(a.alt - b.alt);
       if (v >= VSEP_FT) continue;
-      conflicts.push({ a, b, h_nm: h, v_ft: v });
+
+      const conflict = { a, b, h_nm: h, v_ft: v };
+      conflicts.push(conflict);
+
+      // ✅ Sentry warning non-bloquant + anti-spam
+      logConflictToSentry(conflict, tUnix);
     }
   }
 
@@ -825,4 +877,5 @@ fetch(DATA_URL)
     console.error(err);
     label.textContent = "Error: " + err.message;
   });
+
 demoBtn.onclick = () => runDemo(parseInt(slider.min, 10));
