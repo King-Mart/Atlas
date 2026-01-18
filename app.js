@@ -4,6 +4,9 @@ const toggleLabels = document.getElementById("toggleLabels");
 const playBtn = document.getElementById("playBtn");
 const slider = document.getElementById("time");
 const label = document.getElementById("label");
+const jumpTimeInput = document.getElementById('jumpTime');
+const jumpBtn = document.getElementById('jumpBtn');
+const timeDisplay = document.getElementById('timeDisplay');
 const conflictsDiv = document.getElementById("conflicts");
 const conflictCountEl = document.getElementById("conflictCount");
 
@@ -713,7 +716,9 @@ function refreshAnalyticsPanels(tUnix) {
 
 function update() {
   const t = parseInt(slider.value, 10);
-  label.textContent = `UTC: ${new Date(t * 1000).toISOString()}`;
+  const iso = new Date(t * 1000).toISOString();
+  label.textContent = `UTC: ${iso}`;
+  if (timeDisplay) timeDisplay.textContent = `${iso.replace('T',' ').replace('Z',' UTC')}`;
 
   const conflicts = detectConflictsAtTime(t);
   renderConflicts(conflicts);
@@ -724,6 +729,30 @@ function update() {
   refreshAnalyticsPanels(t);
 }
 updateFn = update;
+
+// jump button handler: accepts unix seconds or ISO timestamp
+if (jumpBtn) {
+  jumpBtn.onclick = () => {
+    const v = (jumpTimeInput && jumpTimeInput.value || '').trim();
+    if (!v) return;
+    let target = NaN;
+    if (/^\d+$/.test(v)) {
+      target = parseInt(v, 10);
+      // if it's a 13-digit ms timestamp, convert
+      if (String(v).length > 10) target = Math.floor(target / 1000);
+    } else {
+      const ms = Date.parse(v);
+      if (!isNaN(ms)) target = Math.floor(ms / 1000);
+    }
+    if (!isFinite(target)) { alert('Invalid time format. Use unix seconds or ISO UTC.'); return; }
+    // clamp to slider bounds
+    const minT = parseInt(slider.min, 10);
+    const maxT = parseInt(slider.max, 10);
+    const clamped = Math.max(minT, Math.min(maxT, target));
+    slider.value = String(clamped);
+    updateFn();
+  };
+}
 
 // --- Autoplay ---
 let playing = false;
