@@ -756,7 +756,10 @@ function refreshAnalyticsPanels(tUnix) {
   for (const r of rows.slice(0,6)) {
     const el = document.createElement('div');
     el.className = 'row';
-    el.innerHTML = `<div style="font-weight:600;">${r.ap} — ${r.ops} ops</div>
+    el.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;">
+        <div style="font-weight:600;">${r.ap} — ${r.ops} ops</div>
+        ${r.ops > 6 ? '<div title="High operations in short window" style="color:#b00;font-weight:700;">●</div>' : ''}
+      </div>
       <div style="font-size:12px;color:#444;">Deps: ${r.deps} | Arrs: ${r.arrs} | ${new Date(r.windowStart*1000).toISOString().slice(11,16)}</div>`;
     el.onclick = () => {
       const coords = AIRPORTS[r.ap];
