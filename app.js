@@ -125,12 +125,14 @@ function hideSuggestion() {
   if (suggestionPanel) suggestionPanel.style.display = 'none';
 }
 
-function showSuggestion(conflict, tUnix) {
+// app.js - Updated showSuggestion function
+async function showSuggestion(conflict, tUnix) {
   if (!suggestionPanel || !suggestionBody) return;
   const a = conflict.a.obj.f;
   const b = conflict.b.obj.f;
   const timeStr = new Date(tUnix * 1000).toISOString();
 
+  // Basic conflict info
   suggestionBody.innerHTML = `
     <div style="font-weight:700;">${a.ACID || 'Flight A'} ↔ ${b.ACID || 'Flight B'}</div>
     <div style="font-size:12px;color:#ddd;">UTC ${timeStr}</div>
@@ -138,9 +140,201 @@ function showSuggestion(conflict, tUnix) {
     <div style="font-size:13px;">Vertical separation: ${Math.round(conflict.v_ft)} ft (limit ${VSEP_FT} ft)</div>
     <div style="margin-top:6px;font-size:13px;">Altitudes: ${(a.altitude || '?')} ft vs ${(b.altitude || '?')} ft</div>
     <div style="font-size:13px;">Routes: ${(a['departure airport'] || '?')} → ${(a['arrival airport'] || '?')} | ${(b['departure airport'] || '?')} → ${(b['arrival airport'] || '?')}</div>
+    <div style="margin-top:10px;border-top:1px solid #444;padding-top:10px;">
+      <div style="font-weight:600;margin-bottom:8px;">AI-Powered Resolution Options:</div>
+      <div id="aiSuggestions" style="font-size:13px;color:#ccc;">Analyzing conflict...</div>
+    </div>
   `;
 
   suggestionPanel.style.display = 'block';
+
+  // Get AI suggestions
+  await getAISuggestions(conflict, tUnix);
+}
+
+// New function to get AI suggestions
+async function getAISuggestions(conflict, tUnix) {
+  const suggestionsDiv = document.getElementById('aiSuggestions');
+  
+  try {
+    // Try server-side AI first
+    const suggestions = await fetchAISuggestions(conflict, tUnix);
+    renderAISuggestions(suggestions, conflict);
+  } catch (error) {
+    console.warn('Server AI failed, using client-side rules');
+    // Fallback to client-side rule-based suggestions
+    const fallbackSuggestions = generateRuleBasedSuggestions(conflict);
+    renderAISuggestions(fallbackSuggestions, conflict);
+  }
+}
+
+// Server AI call
+async function fetchAISuggestions(conflict, tUnix) {
+  try {
+    const response = await fetch('http://localhost:3000/api/ai-suggestions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conflict: {
+          flightA: conflict.a.obj.f,
+          flightB: conflict.b.obj.f,
+          h_nm: conflict.h_nm,
+          v_ft: conflict.v_ft,
+          time: tUnix
+        },
+        allFlights: flightObjs.map(f => f.f)
+      })
+    });
+    
+    if (!response.ok) throw new Error('Server error');
+    return await response.json();
+  } catch (error) {
+    throw error; // Re-throw to trigger fallback
+  }
+}
+
+// Client-side rule-based suggestions (fallback)
+function generateRuleBasedSuggestions(conflict) {
+  const a = conflict.a.obj.f;
+  const b = conflict.b.obj.f;
+  const suggestions = [];
+  
+  // Rule 1: Altitude adjustment
+  if (conflict.v_ft < VSEP_FT) {
+    const altDiff = Math.abs(a.altitude - b.altitude);
+    const targetAlt = Math.max(a.altitude, b.altitude) + VSEP_FT;
+    
+    suggestions.push({
+      id: 'alt_adj_1',
+      type: 'altitude',
+      target: a.altitude < b.altitude ? a.ACID : b.ACID,
+      action: `Increase altitude by ${VSEP_FT - altDiff} ft`,
+      newAltitude: targetAlt,
+      confidence: 0.8,
+      impact: 'LOW',
+      description: 'Vertical separation is the primary issue. Adjusting altitude is safest.'
+    });
+  }
+  
+  // Rule 2: Speed adjustment
+  suggestions.push({
+    id: 'speed_adj_1',
+    type: 'speed',
+    target: a.ACID,
+    action: `Reduce speed by 20 knots`,
+    newSpeed: a['aircraft speed'] * 0.95,
+    confidence: 0.6,
+    impact: 'MEDIUM',
+    description: 'Slowing flight allows temporal separation'
+  });
+  
+  // Rule 3: Minor route deviation
+  suggestions.push({
+    id: 'route_dev_1',
+    type: 'route',
+    target: a.ACID,
+    action: 'Add minor waypoint offset',
+    newRoute: generateOffsetRoute(a.route),
+    confidence: 0.7,
+    impact: 'LOW',
+    description: 'Small lateral deviation provides horizontal separation'
+  });
+  
+  // Rule 4: Time delay (least preferred)
+  suggestions.push({
+    id: 'time_delay_1',
+    type: 'time',
+    target: a.ACID,
+    action: 'Delay departure by 5 minutes',
+    newDepartureTime: a['departure time'] + 300,
+    confidence: 0.9,
+    impact: 'HIGH',
+    description: 'Temporal separation avoids conflict but causes delay'
+  });
+  
+  return suggestions;
+}
+
+// Render suggestions with apply buttons
+function renderAISuggestions(suggestions, conflict) {
+  const suggestionsDiv = document.getElementById('aiSuggestions');
+  
+  if (!suggestions || suggestions.length === 0) {
+    suggestionsDiv.innerHTML = '<div style="color:#888;font-style:italic;">No AI suggestions available</div>';
+    return;
+  }
+  
+  let html = '';
+  suggestions.forEach((suggestion, index) => {
+    html += `
+      <div class="ai-suggestion" style="margin:8px 0;padding:8px;background:rgba(255,255,255,0.05);border-radius:6px;">
+        <div style="font-weight:500;color:#4fc3f7;">${suggestion.description}</div>
+        <div style="font-size:12px;margin:4px 0;color:#bbb;">
+          <span style="background:${getImpactColor(suggestion.impact)};padding:2px 6px;border-radius:3px;font-size:10px;">
+            ${suggestion.impact} IMPACT
+          </span>
+          <span style="margin-left:8px;">Confidence: ${(suggestion.confidence * 100).toFixed(0)}%</span>
+        </div>
+        <button onclick="applySuggestion('${suggestion.id}', ${index})" 
+                style="margin-top:6px;padding:4px 12px;background:#4caf50;border:none;border-radius:4px;color:white;cursor:pointer;font-size:12px;">
+          Apply This Solution
+        </button>
+      </div>
+    `;
+  });
+  
+  suggestionsDiv.innerHTML = html;
+}
+
+function getImpactColor(impact) {
+  switch(impact) {
+    case 'LOW': return '#8bc34a';
+    case 'MEDIUM': return '#ff9800';
+    case 'HIGH': return '#f44336';
+    default: return '#666';
+  }
+}
+
+// Apply suggestion to JSON data
+async function applySuggestion(suggestionId, index) {
+  const conflict = getSelectedConflict(); // You'll need to track selected conflict
+  const suggestions = await getSuggestionsForConflict(conflict);
+  const suggestion = suggestions[index];
+  
+  // Apply the edit
+  edits[suggestion.target] = edits[suggestion.target] || {};
+  
+  switch(suggestion.type) {
+    case 'altitude':
+      edits[suggestion.target].altitude_delta_ft = 
+        (edits[suggestion.target].altitude_delta_ft || 0) + 
+        (suggestion.newAltitude - getFlight(suggestion.target).altitude);
+      break;
+    case 'time':
+      edits[suggestion.target].departure_time_delta = 
+        (edits[suggestion.target].departure_time_delta || 0) + 
+        (suggestion.newDepartureTime - getFlight(suggestion.target)['departure time']);
+      break;
+    case 'speed':
+      // Note: Speed edits need to be tracked differently
+      console.warn('Speed adjustment not yet implemented in edits system');
+      break;
+    case 'route':
+      console.warn('Route adjustment not yet implemented in edits system');
+      break;
+  }
+  
+  // Update UI
+  renderEditsPanel();
+  updateFn();
+  
+  // Show confirmation
+  showNotification(`Applied suggestion to ${suggestion.target}`);
+}
+
+// Helper function to get flight by ACID
+function getFlight(acid) {
+  return flightObjs.find(f => f.f.ACID === acid)?.f;
 }
 
 if (suggestionClose) suggestionClose.onclick = hideSuggestion;
@@ -486,7 +680,7 @@ function renderHotspots(viewer, snapshot) {
 const DEMO = [
   { label: "Morning push: departures ramp up", tOffsetMin: 0, camera: { lon:-79.63, lat:43.68, h:2500000 } },
   { label: "Hotspot corridor forms (Ontario)", tOffsetMin: 35, camera: { lon:-84.0, lat:46.0, h:1800000 } },
-  { label: "Loss-of-separation detected", tOffsetMin: 55, camera: { lon:-78.03, lat:45.88, h:900000 } },
+  { label: "Lives are at risk", tOffsetMin: 55, camera: { lon:-78.03, lat:45.88, h:900000 } },
   { label: "Apply fix: delay one flight +5 min", tOffsetMin: 60, action: "applyFix" },
   { label: "After: conflict resolved", tOffsetMin: 65, camera: { lon:-78.03, lat:45.88, h:900000 } },
 ];

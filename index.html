@@ -96,6 +96,26 @@
       <div id="suggestionBody" class="muted">Select a conflict to view details.</div>
     </div>
 
+    <!-- 1️⃣ Charger Sentry EN PREMIER -->
+    <script
+      src="https://js.sentry-cdn.com/7337446eaad7c86cddacc6198ff7a8d0.min.js" {% comment %} <!--src="https://js.sentry-cdn.com/558b416aa6680796827d32a9ab5a3caf.min.js" --> {% endcomment %}
+      crossorigin="anonymous"
+    ></script>
+
+    <!-- 2️⃣ Initialisation Sentry -->
+    <script>
+      Sentry.onLoad(function () {
+        Sentry.init({
+          // ⚠️ Mets ton DSN ici (Project Settings -> Client Keys (DSN))
+          // dsn: "https://PUBLIC_KEY@oXXXX.ingest.sentry.io/PROJECT_ID",
+          environment: "dev",
+          // utile pour regrouper un peu mieux
+          release: "sky-web@dev",
+        });
+      });
+    </script>
+    <!-- Add to index.html -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
     <script src="analytics.js"></script>
     <script src="app.js"></script>
   </body>
