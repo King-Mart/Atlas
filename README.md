@@ -1,15 +1,62 @@
 # Atlas
 
+3D Flight Trajectory Insight with AI-powered conflict resolution
+
+## Project Structure
+
+```
+Atlas/
+├── client/             # Frontend files
+│   ├── datasets/       # Flight data JSON files
+│   ├── index.html      # Main HTML page
+│   ├── app.js          # Main application logic
+│   ├── analytics.js    # Analytics tracking
+│   └── client-ml.js    # Client-side ML
+├── server/             # Backend files
+│   ├── ai-service.js   # AI suggestions API
+│   └── serve-client.js # Static file server
+├── .env                # Environment variables
+└── package.json        # Dependencies
+```
+
+## Setup
+
+1. Install dependencies:
+```bash
+npm install
+```
+
+2. Configure your OpenAI API key in `.env`:
+```
+OPENAI_API_KEY=your_key_here
+```
+
+## Running the Application
+
+### Option 1: Run AI Service Only
+```bash
+npm run start:server
+```
+Then open `client/index.html` directly in your browser or use a simple HTTP server.
+
+### Option 2: Run Both Services
+Terminal 1 - AI Service (port 3000):
+```bash
+npm run start:server
+```
+
+Terminal 2 - Client Server (port 8080):
+```bash
+npm run start:client
+```
+
+Then open http://localhost:8080
+
+## Features
+
 - Increase the time between takeoffs 
 - Close vehicle should have different cruising altitude
 - Traffic density in latitude corridors 
 - Prioritize the postponement of cargo flights over passenger flights
-
-Trajectory Insight MVP
-----------------------
-Open index.html in a local server (required for fetch).
-Example:
-  python -m http.server 8000
-Then open http://localhost:8000
 
 This is synthetic data for hackathon visualization only.

@@ -10,7 +10,7 @@ const conflictCountEl = document.getElementById("conflictCount");
 // Dataset
 function getDatasetUrl() {
   const params = new URLSearchParams(window.location.search);
-  return params.get("data") || "canadian_flights_1000.json";
+  return params.get("data") || "datasets/canadian_flights_1000.json";
 }
 const DATA_URL = getDatasetUrl();
 const datasetEl = document.getElementById("dataset");
@@ -125,9 +125,18 @@ function hideSuggestion() {
   if (suggestionPanel) suggestionPanel.style.display = 'none';
 }
 
-// app.js - Updated showSuggestion function
-async function showSuggestion(conflict, tUnix) {
+// app.js - Store selected conflict globally
+let selectedConflict = null;
+let selectedConflictTime = null;
+
+// Update showSuggestion function
+function showSuggestion(conflict, tUnix) {
   if (!suggestionPanel || !suggestionBody) return;
+  
+  // Store for later use
+  selectedConflict = conflict;
+  selectedConflictTime = tUnix;
+  
   const a = conflict.a.obj.f;
   const b = conflict.b.obj.f;
   const timeStr = new Date(tUnix * 1000).toISOString();
@@ -141,15 +150,217 @@ async function showSuggestion(conflict, tUnix) {
     <div style="margin-top:6px;font-size:13px;">Altitudes: ${(a.altitude || '?')} ft vs ${(b.altitude || '?')} ft</div>
     <div style="font-size:13px;">Routes: ${(a['departure airport'] || '?')} → ${(a['arrival airport'] || '?')} | ${(b['departure airport'] || '?')} → ${(b['arrival airport'] || '?')}</div>
     <div style="margin-top:10px;border-top:1px solid #444;padding-top:10px;">
-      <div style="font-weight:600;margin-bottom:8px;">AI-Powered Resolution Options:</div>
+      <div style="font-weight:600;margin-bottom:8px;">AI Resolution Options:</div>
       <div id="aiSuggestions" style="font-size:13px;color:#ccc;">Analyzing conflict...</div>
     </div>
   `;
 
   suggestionPanel.style.display = 'block';
 
-  // Get AI suggestions
-  await getAISuggestions(conflict, tUnix);
+  // Generate and display AI suggestions
+  generateAndDisplaySuggestions(conflict);
+}
+
+// Generate suggestions for the conflict
+async function generateAndDisplaySuggestions(conflict) {
+  const suggestionsDiv = document.getElementById('aiSuggestions');
+  
+  // Show loading
+  suggestionsDiv.innerHTML = '<div style="color:#888;font-style:italic;">Analyzing conflict...</div>';
+  
+  try {
+    // Get AI suggestions (using your existing AI system or fallback)
+    const suggestions = await getAISuggestionsForConflict(conflict);
+    renderAISuggestions(suggestions, conflict);
+  } catch (error) {
+    console.error('Error generating suggestions:', error);
+    suggestionsDiv.innerHTML = '<div style="color:#f44336;">Error generating suggestions</div>';
+  }
+}
+
+// Get AI suggestions (adapt to your existing AI system)
+async function getAISuggestionsForConflict(conflict) {
+  // Use your existing AI system or create simple rules
+  return generateRuleBasedSuggestions(conflict);
+}
+
+// Render suggestions with apply buttons
+function renderAISuggestions(suggestions, conflict) {
+  const suggestionsDiv = document.getElementById('aiSuggestions');
+  
+  if (!suggestions || suggestions.length === 0) {
+    suggestionsDiv.innerHTML = '<div style="color:#888;font-style:italic;">No suggestions available</div>';
+    return;
+  }
+  
+  let html = '';
+  suggestions.forEach((suggestion, index) => {
+    const impactColor = getImpactColor(suggestion.impact);
+    html += `
+      <div class="ai-suggestion" style="margin:10px 0;padding:10px;background:rgba(255,255,255,0.05);border-radius:6px;border-left:4px solid ${impactColor};">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+          <div style="flex:1;">
+            <div style="font-weight:500;color:#4fc3f7;margin-bottom:4px;">${suggestion.action}</div>
+            <div style="font-size:12px;color:#bbb;margin-bottom:6px;">${suggestion.description}</div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span style="background:${impactColor};padding:2px 8px;border-radius:3px;font-size:11px;color:white;">
+                ${suggestion.impact} IMPACT
+              </span>
+              <span style="font-size:11px;color:#aaa;">
+                Confidence: ${(suggestion.confidence * 100).toFixed(0)}%
+              </span>
+            </div>
+          </div>
+          <button onclick="applySuggestion(${index})" 
+                  style="margin-left:10px;padding:6px 12px;background:#4caf50;border:none;border-radius:4px;color:white;cursor:pointer;font-size:12px;white-space:nowrap;">
+            Apply
+          </button>
+        </div>
+      </div>
+    `;
+  });
+  
+  suggestionsDiv.innerHTML = html;
+}
+
+// Simple rule-based suggestions (fallback if AI not available)
+function generateRuleBasedSuggestions(conflict) {
+  const a = conflict.a.obj.f;
+  const b = conflict.b.obj.f;
+  const suggestions = [];
+  
+  // Get time of conflict
+  const conflictTime = selectedConflictTime || Date.now() / 1000;
+  
+  // Calculate position along route to determine best action
+  const aProgress = calculateFlightProgress(a, conflictTime);
+  const bProgress = calculateFlightProgress(b, conflictTime);
+  
+  // Determine which flight is more flexible to change
+  const aIsEarly = aProgress < 0.5;
+  const bIsEarly = bProgress < 0.5;
+  const aIsCargo = a.is_cargo;
+  const bIsCargo = b.is_cargo;
+  
+  // Rule 1: Altitude adjustment (most common, lowest impact)
+  if (conflict.v_ft < VSEP_FT) {
+    const higherFlight = a.altitude > b.altitude ? a : b;
+    const lowerFlight = a.altitude > b.altitude ? b : a;
+    const neededSeparation = VSEP_FT - conflict.v_ft;
+    
+    suggestions.push({
+      type: 'altitude',
+      target: lowerFlight.ACID,
+      action: `Increase ${lowerFlight.ACID} altitude by ${neededSeparation} ft`,
+      newAltitude: lowerFlight.altitude + neededSeparation + 1000,
+      description: `Climb ${lowerFlight.ACID} to ${lowerFlight.altitude + neededSeparation + 1000} ft for vertical separation`,
+      confidence: 0.85,
+      impact: 'LOW'
+    });
+    
+    suggestions.push({
+      type: 'altitude',
+      target: higherFlight.ACID,
+      action: `Increase ${higherFlight.ACID} altitude by ${neededSeparation} ft`,
+      newAltitude: higherFlight.altitude + neededSeparation + 1000,
+      description: `Climb ${higherFlight.ACID} for additional safety margin`,
+      confidence: 0.75,
+      impact: 'LOW'
+    });
+  }
+  
+  // Rule 2: Speed adjustment (medium impact)
+  if (conflict.h_nm < HSEP_NM) {
+    // Check which flight can more easily adjust speed
+    const adjustFlight = aIsCargo ? a : b; // Prefer adjusting cargo over passenger
+    const speedAdjustment = 20; // knots
+    
+    suggestions.push({
+      type: 'speed',
+      target: adjustFlight.ACID,
+      action: `Reduce ${adjustFlight.ACID} speed by ${speedAdjustment} knots`,
+      newSpeed: adjustFlight['aircraft speed'] - speedAdjustment,
+      description: `Slow ${adjustFlight.ACID} to create temporal separation`,
+      confidence: 0.70,
+      impact: 'MEDIUM'
+    });
+  }
+  
+  // Rule 3: Small route deviation (for horizontal conflicts)
+  if (conflict.h_nm < HSEP_NM && conflict.v_ft >= VSEP_FT) {
+    suggestions.push({
+      type: 'route',
+      target: a.ACID,
+      action: `Add minor waypoint offset for ${a.ACID}`,
+      newRoute: generateOffsetRoute(a.route),
+      description: 'Small lateral deviation of 5-10 NM to increase horizontal separation',
+      confidence: 0.65,
+      impact: 'MEDIUM'
+    });
+  }
+  
+  // Rule 4: Time delay (last resort, high impact)
+  if ((aIsEarly || bIsEarly) && (aIsCargo || bIsCargo)) {
+    // Only suggest delays for cargo flights in early stages
+    const delayFlight = aIsCargo ? a : b;
+    const delayMinutes = 5;
+    
+    suggestions.push({
+      type: 'time',
+      target: delayFlight.ACID,
+      action: `Delay ${delayFlight.ACID} by ${delayMinutes} minutes`,
+      newDepartureTime: delayFlight['departure time'] + (delayMinutes * 60),
+      description: `Delay ${delayFlight.ACID} departure to avoid temporal overlap`,
+      confidence: 0.90,
+      impact: 'HIGH'
+    });
+  }
+  
+  return suggestions;
+}
+
+// Helper to calculate flight progress (0-1)
+function calculateFlightProgress(flight, currentTime) {
+  const elapsed = currentTime - flight['departure time'];
+  if (elapsed < 0) return 0;
+  
+  // Estimate total flight time (simplified)
+  const estimatedFlightTime = 2 * 3600; // Assume 2 hours
+  return Math.min(elapsed / estimatedFlightTime, 1);
+}
+
+// Generate an offset route
+function generateOffsetRoute(routeStr) {
+  if (!routeStr || !routeStr.trim()) return '';
+  
+  const waypoints = routeStr.trim().split(/\s+/);
+  if (waypoints.length === 0) return '';
+  
+  // Add a small offset to the first waypoint
+  const firstWp = waypoints[0];
+  const parts = firstWp.split('/');
+  if (parts.length !== 2) return routeStr;
+  
+  // Add small offset (0.1 degrees ≈ 6 NM)
+  const lat = parseCoord(parts[0]);
+  const lon = parseCoord(parts[1]);
+  const offsetLat = lat + 0.1;
+  const offsetLon = lon + 0.1;
+  
+  const newFirstWp = `${Math.abs(offsetLat).toFixed(2)}${offsetLat >= 0 ? 'N' : 'S'}/${Math.abs(offsetLon).toFixed(2)}${offsetLon >= 0 ? 'E' : 'W'}`;
+  waypoints[0] = newFirstWp;
+  
+  return waypoints.join(' ');
+}
+
+// Impact color coding
+function getImpactColor(impact) {
+  switch(impact) {
+    case 'LOW': return '#8bc34a'; // Green
+    case 'MEDIUM': return '#ff9800'; // Orange
+    case 'HIGH': return '#f44336'; // Red
+    default: return '#666';
+  }
 }
 
 // New function to get AI suggestions
@@ -275,7 +486,7 @@ function renderAISuggestions(suggestions, conflict) {
           </span>
           <span style="margin-left:8px;">Confidence: ${(suggestion.confidence * 100).toFixed(0)}%</span>
         </div>
-        <button onclick="applySuggestion('${suggestion.id}', ${index})" 
+        <button onclick="applySuggestion(${index})" 
                 style="margin-top:6px;padding:4px 12px;background:#4caf50;border:none;border-radius:4px;color:white;cursor:pointer;font-size:12px;">
           Apply This Solution
         </button>
@@ -340,46 +551,141 @@ function getFlight(acid) {
 if (suggestionClose) suggestionClose.onclick = hideSuggestion;
 if (suggestionHandle) suggestionHandle.addEventListener('mousedown', onDragStart);
 
+// app.js - Updated renderEditsPanel
 function renderEditsPanel() {
+  if (!editsPanel) return;
+  
   editsPanel.innerHTML = '';
-  // Suggestions
-  const hSugg = document.createElement('div');
-  hSugg.style.marginBottom = '6px';
-  hSugg.innerHTML = `<div style="font-weight:600;">Suggested edits</div>`;
-  editsPanel.appendChild(hSugg);
-  if (!Object.keys(suggestedEdits).length) {
-    const el = document.createElement('div'); el.className='muted'; el.textContent='No suggestions'; editsPanel.appendChild(el);
+  
+  // Header
+  const header = document.createElement('div');
+  header.innerHTML = `<div style="font-weight:600;margin-bottom:8px;">Applied Modifications (Visual Only)</div>
+                     <div style="font-size:11px;color:#666;margin-bottom:12px;">Changes are temporary and don't modify source data</div>`;
+  editsPanel.appendChild(header);
+  
+  // Show applied edits
+  const appliedFlights = Object.keys(edits).filter(acid => 
+    Object.values(edits[acid]).some(val => val !== 0 && val !== undefined && val !== '')
+  );
+  
+  if (appliedFlights.length === 0) {
+    const emptyMsg = document.createElement('div');
+    emptyMsg.className = 'muted';
+    emptyMsg.textContent = 'No modifications applied yet';
+    editsPanel.appendChild(emptyMsg);
   } else {
-    for (const ac of Object.keys(suggestedEdits)) {
-      const s = suggestedEdits[ac];
-      const el = document.createElement('div'); el.className='row';
-      el.innerHTML = `<div style="font-weight:600;">${ac}</div>
-        <div style="font-size:12px;color:#444;">${s.departure_time_delta ? 'Delay: ' + (s.departure_time_delta/60)+' min' : ''} ${s.altitude_delta_ft ? 'Alt: ' + s.altitude_delta_ft + ' ft' : ''}</div>`;
-      const applyBtn = document.createElement('button'); applyBtn.textContent='Apply'; applyBtn.style.marginLeft='6px';
-      applyBtn.onclick = () => { edits[ac] = Object.assign({}, edits[ac]||{}, s); suggestedEdits = {}; renderEditsPanel(); updateFn(); };
-      el.appendChild(applyBtn);
+    appliedFlights.forEach(acid => {
+      const edit = edits[acid];
+      const flightObj = flightObjs.find(f => f.f.ACID === acid);
+      
+      const el = document.createElement('div');
+      el.className = 'row';
+      el.style.cssText = 'padding:8px;margin:6px 0;border:1px solid #ddd;border-radius:6px;';
+      
+      let editText = '';
+      if (edit.altitude_delta_ft) {
+        editText += `Altitude: ${edit.altitude_delta_ft > 0 ? '+' : ''}${edit.altitude_delta_ft} ft<br>`;
+      }
+      if (edit.departure_time_delta) {
+        editText += `Time: ${edit.departure_time_delta > 0 ? '+' : ''}${edit.departure_time_delta/60} min<br>`;
+      }
+      if (edit.speed_delta_kts) {
+        editText += `Speed: ${edit.speed_delta_kts > 0 ? '+' : ''}${edit.speed_delta_kts} kts<br>`;
+      }
+      if (edit.route_modification) {
+        editText += `Route modified<br>`;
+      }
+      
+      el.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-weight:600;font-size:13px;">${acid}</div>
+            <div style="font-size:11px;color:#444;">${editText}</div>
+          </div>
+          <div>
+            <button onclick="undoFlightEdit('${acid}')" 
+                    style="padding:4px 10px;font-size:11px;background:#ff9800;color:white;border:none;border-radius:4px;cursor:pointer;">
+              Undo
+            </button>
+          </div>
+        </div>
+      `;
+      
       editsPanel.appendChild(el);
+    });
+  }
+  
+  // Add reset all button if there are edits
+  if (appliedFlights.length > 0) {
+    const resetDiv = document.createElement('div');
+    resetDiv.style.marginTop = '12px';
+    resetDiv.innerHTML = `
+      <button onclick="resetAllVisualEdits()" 
+              style="width:100%;padding:8px;background:#f44336;color:white;border:none;border-radius:4px;cursor:pointer;font-size:12px;">
+        Reset All Visual Changes
+      </button>
+    `;
+    editsPanel.appendChild(resetDiv);
+  }
+}
+
+// Undo a single flight's edits
+function undoFlightEdit(acid) {
+  const flightObj = flightObjs.find(f => f.f.ACID === acid);
+  if (!flightObj) return;
+  
+  // Restore original values
+  if (flightObj.originalValues) {
+    flightObj.f.altitude = flightObj.originalValues.altitude;
+    flightObj.f['departure time'] = flightObj.originalValues.departureTime;
+    flightObj.f['aircraft speed'] = flightObj.originalValues.speed;
+    flightObj.f.route = flightObj.originalValues.route;
+    
+    // Reset altitude in meters
+    flightObj.altM = flightObj.originalValues.altitude * 0.3048;
+    
+    // Reset visual properties
+    flightObj.planeEntityTop.billboard.color = Cesium.Color.YELLOW;
+    flightObj.aiModified = false;
+    
+    // Rebuild route if needed
+    if (flightObj.originalValues.route) {
+      const ptsLL = buildPointsForFlight(flightObj.f);
+      if (ptsLL && ptsLL.length >= 2) {
+        const positions = ptsLL.map(([lat, lon]) => llToCartesian(lat, lon, flightObj.altM));
+        flightObj.routeEntity.polyline.positions = positions;
+      }
     }
   }
+  
+  // Remove from edits
+  delete edits[acid];
+  delete flightObj.originalValues;
+  
+  // Update everything
+  renderEditsPanel();
+  updateFn();
+  
+  showNotification(`Undone changes to ${acid}`, 'success');
+}
 
-  // Applied edits
-  const hApplied = document.createElement('div');
-  hApplied.style.marginTop = '8px';
-  hApplied.innerHTML = `<div style="font-weight:600;">Applied edits</div>`;
-  editsPanel.appendChild(hApplied);
-  if (!Object.keys(edits).length) {
-    const el = document.createElement('div'); el.className='muted'; el.textContent='No applied edits'; editsPanel.appendChild(el);
-  } else {
-    for (const ac of Object.keys(edits)) {
-      const s = edits[ac];
-      const el = document.createElement('div'); el.className='row';
-      el.innerHTML = `<div style="font-weight:600;">${ac}</div>
-        <div style="font-size:12px;color:#444;">${s.departure_time_delta ? 'Delay: ' + (s.departure_time_delta/60)+' min' : ''} ${s.altitude_delta_ft ? 'Alt: ' + s.altitude_delta_ft + ' ft' : ''}</div>`;
-      const undoBtn = document.createElement('button'); undoBtn.textContent='Undo'; undoBtn.style.marginLeft='6px';
-      undoBtn.onclick = () => { delete edits[ac]; renderEditsPanel(); updateFn(); };
-      el.appendChild(undoBtn);
-      editsPanel.appendChild(el);
-    }
+// Reset all visual edits
+function resetAllVisualEdits() {
+  if (confirm('Reset all visual changes? This will undo all modifications.')) {
+    flightObjs.forEach(obj => {
+      if (obj.originalValues) {
+        undoFlightEdit(obj.f.ACID);
+      }
+    });
+    
+    // Clear all edits
+    edits = {};
+    suggestedEdits = {};
+    
+    renderEditsPanel();
+    updateFn();
+    
+    showNotification('All visual changes reset', 'success');
   }
 }
 
@@ -804,6 +1110,182 @@ function renderConflicts(conflicts) {
   }
 }
 
+
+// app.js - Apply suggestion (VISUAL CHANGES ONLY)
+async function applySuggestion(suggestionIndex) {
+  if (!selectedConflict) {
+    showNotification('No conflict selected', 'error');
+    return;
+  }
+  
+  // Get suggestions for current conflict
+  const suggestions = await getAISuggestionsForConflict(selectedConflict);
+  const suggestion = suggestions[suggestionIndex];
+  
+  if (!suggestion) {
+    showNotification('Invalid suggestion', 'error');
+    return;
+  }
+  
+  // Find the flight object to modify
+  const flightObj = flightObjs.find(f => f.f.ACID === suggestion.target);
+  if (!flightObj) {
+    showNotification(`Flight ${suggestion.target} not found`, 'error');
+    return;
+  }
+  
+  // Store original values before modification (for undo)
+  if (!flightObj.originalValues) {
+    flightObj.originalValues = {
+      altitude: flightObj.f.altitude,
+      departureTime: flightObj.f['departure time'],
+      speed: flightObj.f['aircraft speed'],
+      route: flightObj.f.route
+    };
+  }
+  
+  // Apply the suggestion to the EDIT object (not original data!)
+  edits[suggestion.target] = edits[suggestion.target] || {};
+  
+  switch(suggestion.type) {
+    case 'altitude':
+      // Calculate the delta from original
+      const originalAlt = flightObj.originalValues.altitude;
+      edits[suggestion.target].altitude_delta_ft = suggestion.newAltitude - originalAlt;
+      
+      // Update visualization (temporary)
+      flightObj.f.altitude = suggestion.newAltitude;
+      flightObj.altM = suggestion.newAltitude * 0.3048; // Update meters for 3D
+      
+      // Update flight color to indicate modified
+      flightObj.planeEntityTop.billboard.color = Cesium.Color.fromCssColorString('#00ff00'); // Green
+      break;
+      
+    case 'time':
+      const originalTime = flightObj.originalValues.departureTime;
+      edits[suggestion.target].departure_time_delta = suggestion.newDepartureTime - originalTime;
+      
+      flightObj.f['departure time'] = suggestion.newDepartureTime;
+      flightObj.planeEntityTop.billboard.color = Cesium.Color.fromCssColorString('#ff9900'); // Orange
+      break;
+      
+    case 'speed':
+      const originalSpeed = flightObj.originalValues.speed;
+      edits[suggestion.target].speed_delta_kts = suggestion.newSpeed - originalSpeed;
+      
+      flightObj.f['aircraft speed'] = suggestion.newSpeed;
+      flightObj.planeEntityTop.billboard.color = Cesium.Color.fromCssColorString('#ffff00'); // Yellow
+      break;
+      
+    case 'route':
+      const originalRoute = flightObj.originalValues.route;
+      edits[suggestion.target].route_modification = suggestion.newRoute;
+      
+      flightObj.f.route = suggestion.newRoute;
+      
+      // Need to rebuild the route visualization
+      const ptsLL = buildPointsForFlight(flightObj.f);
+      if (ptsLL && ptsLL.length >= 2) {
+        const altM = flightObj.altM;
+        const positions = ptsLL.map(([lat, lon]) => llToCartesian(lat, lon, altM));
+        flightObj.routeEntity.polyline.positions = positions;
+      }
+      
+      flightObj.planeEntityTop.billboard.color = Cesium.Color.fromCssColorString('#0099ff'); // Blue
+      break;
+  }
+  
+  // Mark as AI-modified
+  flightObj.aiModified = true;
+  flightObj.modificationType = suggestion.type;
+  
+  // Force a complete re-render
+  updateFn();
+  
+  // Update edits panel
+  renderEditsPanel();
+  
+  // Show success notification
+  showNotification(`✓ Applied: ${suggestion.action}`, 'success');
+  
+  // Close suggestion panel after applying
+  hideSuggestion();
+  
+  // Debug: Verify original data is unchanged
+  verifyOriginalDataIntegrity();
+}
+
+// Verify original data is unchanged (for debugging)
+function verifyOriginalDataIntegrity() {
+  console.group('Data Integrity Check');
+  
+  flightObjs.forEach(obj => {
+    const flightId = obj.f.ACID;
+    const baseFlight = flightsBase.find(f => f.ACID === flightId);
+    
+    if (baseFlight) {
+      // Check if original values match
+      if (obj.originalValues) {
+        console.log(`Flight ${flightId}:`);
+        console.log(`  Original altitude: ${baseFlight.altitude} ft`);
+        console.log(`  Current altitude: ${obj.f.altitude} ft`);
+        console.log(`  Delta: ${edits[flightId]?.altitude_delta_ft || 0} ft`);
+        console.log(`  Visual only: ${obj.f.altitude !== baseFlight.altitude ? 'YES' : 'NO'}`);
+      }
+    }
+  });
+  
+  console.groupEnd();
+}
+
+// Add undo functionality for individual flights
+function addUndoButtonToEdits() {
+  // This will be called from renderEditsPanel
+}
+
+// Show notification
+function showNotification(message, type = 'info') {
+  // Create or use existing notification system
+  const notification = document.createElement('div');
+  notification.textContent = message;
+  notification.style.cssText = `
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 12px 20px;
+    background: ${type === 'error' ? '#f44336' : type === 'success' ? '#4caf50' : '#2196f3'};
+    color: white;
+    border-radius: 6px;
+    z-index: 1000;
+    font-family: system-ui;
+    animation: slideIn 0.3s ease;
+  `;
+  
+  document.body.appendChild(notification);
+  
+  setTimeout(() => {
+    notification.style.animation = 'slideOut 0.3s ease';
+    setTimeout(() => notification.remove(), 300);
+  }, 3000);
+  
+  // Add CSS animations if not present
+  if (!document.getElementById('notification-styles')) {
+    const style = document.createElement('style');
+    style.id = 'notification-styles';
+    style.textContent = `
+      @keyframes slideIn {
+        from { transform: translateX(100%); opacity: 0; }
+        to { transform: translateX(0); opacity: 1; }
+      }
+      @keyframes slideOut {
+        from { transform: translateX(0); opacity: 1; }
+        to { transform: translateX(100%); opacity: 0; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}
+
 // --- Update loop ---
 let updateFn = null;
 
@@ -958,3 +1440,18 @@ fetch(DATA_URL)
     label.textContent = "Error: " + err.message;
   });
 demoBtn.onclick = () => runDemo(parseInt(slider.min, 10));
+
+// app.js - Add after DOM loads
+document.addEventListener('DOMContentLoaded', () => {
+  // Make applySuggestion globally available
+  window.applySuggestion = applySuggestion;
+  window.undoFlightEdit = undoFlightEdit;
+  window.resetAllVisualEdits = resetAllVisualEdits;
+  
+  // Initialize
+  if (optimizeBtn) {
+    optimizeBtn.onclick = async () => {
+      // Your existing optimize code
+    };
+  }
+});

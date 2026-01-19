@@ -27,6 +27,45 @@
       .row { padding: 6px; border: 1px solid #eee; border-radius: 8px; margin: 6px 0; cursor: pointer; }
       .muted { color:#666; font-size:12px; }
       button { cursor: pointer; }
+      
+      /* Hover effects and scrollbar styling */
+      .ai-suggestion:hover {
+        background: rgba(255, 255, 255, 0.08) !important;
+        transition: background 0.2s ease;
+      }
+      
+      .row:hover {
+        background: #f5f5f5;
+        transition: background 0.2s ease;
+      }
+      
+      button:hover {
+        opacity: 0.9;
+        transition: opacity 0.2s ease;
+      }
+      
+      button:active {
+        transform: translateY(1px);
+      }
+      
+      #suggestion {
+        max-height: 80vh;
+        overflow-y: auto;
+      }
+      
+      #suggestion::-webkit-scrollbar {
+        width: 6px;
+      }
+      
+      #suggestion::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+      }
+      
+      #suggestion::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 3px;
+      }
     </style>
   </head>
   <body>

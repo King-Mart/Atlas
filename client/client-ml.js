@@ -1,3 +1,4 @@
+require('@tensorflow/tfjs')
 // client-ml.js
 class ClientSideConflictResolver {
   constructor() {
