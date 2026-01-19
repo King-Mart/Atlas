@@ -1,20 +1,26 @@
 {
-  "buildCommand": "npm install",
-  "outputDirectory": "client",
-  "productionBranch": "Suggestions-systems",
+  "version": 2,
+  "builds": [
+    {
+      "src": "client/**",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "server/ai-service.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/server/ai-service.js"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/client/$1"
+    }
+  ],
   "env": {
     "OPENAI_API_KEY": "@openai_api_key"
-  },
-  "functions": {
-    "server/ai-service.js": {
-      "memory": 1024,
-      "maxDuration": 60
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/server/ai-service.js"
-    }
-  ]
+  }
 }
