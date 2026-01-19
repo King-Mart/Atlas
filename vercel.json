@@ -1,6 +1,7 @@
 {
   "buildCommand": "npm install",
   "outputDirectory": "client",
+  "productionBranch": "Suggestions-systems",
   "env": {
     "OPENAI_API_KEY": "@openai_api_key"
   },
