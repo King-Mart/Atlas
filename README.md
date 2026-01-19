@@ -55,7 +55,7 @@ Then open http://localhost:8080
 ## Features
 
 - Increase the time between takeoffs 
-- Close vehicle should have different cruising altitude
+- Nearby aircraft should maintain different cruising altitudes
 - Traffic density in latitude corridors 
 - Prioritize the postponement of cargo flights over passenger flights
 
