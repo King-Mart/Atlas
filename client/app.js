@@ -382,7 +382,12 @@ async function getAISuggestions(conflict, tUnix) {
 // Server AI call
 async function fetchAISuggestions(conflict, tUnix) {
   try {
-    const response = await fetch('http://localhost:3000/api/ai-suggestions', {
+    // Use relative path for compatibility with both local dev and Vercel
+    const apiBase = window.location.hostname === 'localhost' 
+      ? 'http://localhost:3000' 
+      : window.location.origin;
+    
+    const response = await fetch(`${apiBase}/api/ai-suggestions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

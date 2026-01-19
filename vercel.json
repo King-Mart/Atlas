@@ -1,0 +1,19 @@
+{
+  "buildCommand": "npm install",
+  "outputDirectory": "client",
+  "env": {
+    "OPENAI_API_KEY": "@openai_api_key"
+  },
+  "functions": {
+    "server/ai-service.js": {
+      "memory": 1024,
+      "maxDuration": 60
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/server/ai-service.js"
+    }
+  ]
+}

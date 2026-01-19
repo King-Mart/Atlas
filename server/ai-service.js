@@ -207,7 +207,13 @@ function generateFallbackSuggestions(conflict) {
   ];
 }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`AI Service running on port ${PORT}`);
-});
+// Export for Vercel serverless
+module.exports = app;
+
+// Local development
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`AI Service running on port ${PORT}`);
+  });
+}
