@@ -1,0 +1,17 @@
+{
+  "name": "atlas-flight-tracker",
+  "version": "1.0.0",
+  "description": "3D Flight Trajectory Insight with AI-powered conflict resolution",
+  "scripts": {
+    "start:server": "node server/ai-service.js",
+    "start:client": "node server/serve-client.js",
+    "dev": "node server/ai-service.js"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs": "^4.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "openai": "^6.16.0"
+  }
+}

@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>3D Trajectory Insight</title>
+    <script src="https://unpkg.com/cesium@1.114/Build/Cesium/Cesium.js"></script>
+    <link href="https://unpkg.com/cesium@1.114/Build/Cesium/Widgets/widgets.css" rel="stylesheet" />
+    <style>
+      html, body, #cesiumContainer { width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden; }
+      #ui {
+        position: absolute; top: 12px; left: 12px; z-index: 10;
+        background: rgba(255,255,255,0.92); padding: 10px; border-radius: 10px;
+        font-family: system-ui; width: 360px;
+        box-shadow: 0 10px 24px rgba(0,0,0,0.15);
+      }
+      #conflicts { max-height: 220px; overflow: auto; font-size: 12px; }
+      #suggestion {
+        position: absolute; top: 64px; right: 12px; z-index: 10;
+        width: 320px; padding: 12px;
+        background: rgba(15, 18, 25, 0.9); color: #fff;
+        border-radius: 10px; box-shadow: 0 10px 24px rgba(0,0,0,0.3);
+        font-family: system-ui; display: none;
+      }
+      #suggestion h4 { margin: 0 0 6px 0; }
+      #suggestion .close { float: right; cursor: pointer; border: none; background: transparent; color: #fff; font-size: 14px; }
+      #suggestion .drag { cursor: move; user-select: none; }
+      .row { padding: 6px; border: 1px solid #eee; border-radius: 8px; margin: 6px 0; cursor: pointer; }
+      .muted { color:#666; font-size:12px; }
+      button { cursor: pointer; }
+      
+      /* Hover effects and scrollbar styling */
+      .ai-suggestion:hover {
+        background: rgba(255, 255, 255, 0.08) !important;
+        transition: background 0.2s ease;
+      }
+      
+      .row:hover {
+        background: #f5f5f5;
+        transition: background 0.2s ease;
+      }
+      
+      button:hover {
+        opacity: 0.9;
+        transition: opacity 0.2s ease;
+      }
+      
+      button:active {
+        transform: translateY(1px);
+      }
+      
+      #suggestion {
+        max-height: 80vh;
+        overflow-y: auto;
+      }
+      
+      #suggestion::-webkit-scrollbar {
+        width: 6px;
+      }
+      
+      #suggestion::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 3px;
+      }
+      
+      #suggestion::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="cesiumContainer"></div>
+
+    <div id="ui">
+      <div style="display:flex; gap:10px; font-size:12px; margin-top:6px; align-items:center;">
+        <label><input id="toggleRoutes" type="checkbox" checked> Routes</label>
+        <label><input id="toggleLabels" type="checkbox"> Labels</label>
+      </div>
+
+      <div style="font-weight:700; margin-top:6px;">3D Trajectory Insight</div>
+
+      <div style="margin:8px 0;">
+        <div class="muted">Dataset</div>
+        <div id="dataset"></div>
+      </div>
+
+      <div style="margin:8px 0;">
+        <div class="muted">Time (UTC)</div>
+        <input id="time" type="range" style="width:100%;" />
+        <div style="display:flex; gap:8px; margin-top:6px; align-items:center;">
+          <button id="playBtn">▶ Play</button>
+          <div id="label" class="muted"></div>
+        </div>
+      </div>
+
+      <hr />
+
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-weight:600;">Conflicts</div>
+        <div id="conflictCount" class="muted">0</div>
+      </div>
+      <div id="conflicts"></div>
+
+      <hr />
+
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-weight:600;">Top Hotspots</div>
+        <button id="optimizeBtn" style="font-size:12px;">Optimize (K=30)</button>
+      </div>
+      <div id="hotspots" style="max-height:150px; overflow:auto; font-size:12px; margin-top:6px;"></div>
+
+      <div style="margin-top:8px; font-weight:600;">Airport Load</div>
+      <div id="airportLoad" style="max-height:120px; overflow:auto; font-size:12px; margin-top:6px;"></div>
+
+      <hr />
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div style="font-weight:600;">Edits (scenario)</div>
+        <div>
+          <button id="applyAllBtn" style="font-size:12px;">Apply All</button>
+          <button id="clearEditsBtn" style="font-size:12px;margin-left:6px;">Clear Edits</button>
+          <button id="demoBtn">Run Demo</button>
+          <div id="narration"></div>
+
+        </div>
+      </div>
+      <div id="editsPanel" style="max-height:160px; overflow:auto; font-size:12px; margin-top:6px;"></div>
+
+    </div>
+
+    <div id="suggestion">
+      <div id="suggestionHandle" class="drag" style="display:flex;justify-content:space-between;align-items:center;">
+        <h4 style="margin:0; font-size:14px;">Conflict Detail</h4>
+        <button id="suggestionClose" class="close" aria-label="Close">✕</button>
+      </div>
+      <div id="suggestionBody" class="muted">Select a conflict to view details.</div>
+    </div>
+
+    <!-- 1️⃣ Charger Sentry EN PREMIER -->
+    <script
+      src="https://js.sentry-cdn.com/7337446eaad7c86cddacc6198ff7a8d0.min.js" {% comment %} <!--src="https://js.sentry-cdn.com/558b416aa6680796827d32a9ab5a3caf.min.js" --> {% endcomment %}
+      crossorigin="anonymous"
+    ></script>
+
+    <!-- 2️⃣ Initialisation Sentry -->
+    <script>
+      Sentry.onLoad(function () {
+        Sentry.init({
+          // ⚠️ Mets ton DSN ici (Project Settings -> Client Keys (DSN))
+          // dsn: "https://PUBLIC_KEY@oXXXX.ingest.sentry.io/PROJECT_ID",
+          environment: "dev",
+          // utile pour regrouper un peu mieux
+          release: "sky-web@dev",
+        });
+      });
+    </script>
+    <!-- Add to index.html -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest"></script>
+    <script src="analytics.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
